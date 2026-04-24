@@ -14,7 +14,6 @@ interface Props {
   main: Exercise[]
   cooldown: Exercise[]
   config: SessionConfig
-  knownExerciseIds: Set<string>
   onTimeChange: (t: TimeSlot) => void
   onStart: () => void
   isStarting: boolean
@@ -22,8 +21,10 @@ interface Props {
 
 function ExerciseRow({
   exercise,
+  showCue,
 }: {
   exercise: Exercise
+  showCue: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -72,7 +73,6 @@ export function WorkoutPreview({
   main,
   cooldown,
   config,
-  knownExerciseIds,
   onTimeChange,
   onStart,
   isStarting,
@@ -159,11 +159,7 @@ export function WorkoutPreview({
           {expandedSections.warmup && (
             <div className="flex flex-col divide-y divide-surface-raised pb-2">
               {warmup.map((ex) => (
-                <ExerciseRow
-                  key={ex.id}
-                  exercise={ex}
-                  showCue={!knownExerciseIds.has(ex.id)}
-                />
+                <ExerciseRow key={ex.id} exercise={ex} />
               ))}
             </div>
           )}
@@ -175,11 +171,7 @@ export function WorkoutPreview({
           {expandedSections.main && (
             <div className="flex flex-col divide-y divide-surface-raised pb-2">
               {main.map((ex) => (
-                <ExerciseRow
-                  key={ex.id}
-                  exercise={ex}
-                  showCue={!knownExerciseIds.has(ex.id)}
-                />
+                <ExerciseRow key={ex.id} exercise={ex} />
               ))}
             </div>
           )}
@@ -191,11 +183,7 @@ export function WorkoutPreview({
           {expandedSections.cooldown && (
             <div className="flex flex-col divide-y divide-surface-raised pb-2">
               {cooldown.map((ex) => (
-                <ExerciseRow
-                  key={ex.id}
-                  exercise={ex}
-                  showCue={!knownExerciseIds.has(ex.id)}
-                />
+                <ExerciseRow key={ex.id} exercise={ex} />
               ))}
             </div>
           )}
