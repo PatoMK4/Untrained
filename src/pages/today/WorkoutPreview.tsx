@@ -21,10 +21,8 @@ interface Props {
 
 function ExerciseRow({
   exercise,
-  showCue,
 }: {
   exercise: Exercise
-  showCue: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
 
