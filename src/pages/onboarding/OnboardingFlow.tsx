@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ProgressDots } from '@/components/ui/ProgressDots'
@@ -17,34 +17,31 @@ import { SquatBenchmark } from './steps/SquatBenchmark'
 import { FitnessLevelStep } from './steps/FitnessLevelStep'
 import { OnboardingComplete } from './steps/OnboardingComplete'
 
-// 12 steps total (was 10)
+// 12 steps total
 // BenchmarkIntro (index 6) has no progress dot — it's a full-screen splash
 const STEPS = [
   GoalStep,            // 0  — dot 0
   FrequencyStep,       // 1  — dot 1
   EnvironmentStep,     // 2  — dot 2
   EquipmentStep,       // 3  — dot 3
-  SplitPreferenceStep, // 4  — dot 4  ← NEW
+  SplitPreferenceStep, // 4  — dot 4
   LimitationsStep,     // 5  — dot 5
   BenchmarkIntro,      // 6  — NO dot (splash screen)
   PushupBenchmark,     // 7  — dot 6
   PullupBenchmark,     // 8  — dot 7
   SquatBenchmark,      // 9  — dot 8
-  FitnessLevelStep,    // 10 — dot 9  ← NEW
+  FitnessLevelStep,    // 10 — dot 9
   OnboardingComplete,  // 11 — dot 10
 ]
 
-// Total progress dots shown = 11 (BenchmarkIntro excluded)
 const PROGRESS_STEPS = 11
-
-// BenchmarkIntro is at index 6 — hide dots on that step
 const BENCHMARK_INTRO_INDEX = 6
 
 export function OnboardingFlow() {
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
   const [data, setData] = useState<OnboardingData>({})
-  const { submitOnboarding, loading } = useOnboarding()
+  const { submitOnboarding } = useOnboarding()
   const navigate = useNavigate()
 
   const handleNext = async (newData: Partial<OnboardingData>) => {
@@ -70,14 +67,12 @@ export function OnboardingFlow() {
   const showDots = !isBenchmarkIntro
   const showBack = step > 0 && !isBenchmarkIntro
 
-  // Dot index: BenchmarkIntro has no dot, so steps after it are offset by -1
   const dotIndex = step > BENCHMARK_INTRO_INDEX ? step - 1 : step
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
       <div className="w-full max-w-md flex flex-col flex-1 px-5 py-8 min-h-screen">
 
-        {/* Header — back button + progress dots */}
         <div className="flex items-center justify-between mb-8 min-h-[24px]">
           {showBack ? (
             <button
@@ -96,7 +91,6 @@ export function OnboardingFlow() {
           )}
         </div>
 
-        {/* Step content — animated slide */}
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
             key={step}
