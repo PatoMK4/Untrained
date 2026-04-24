@@ -1,5 +1,3 @@
-// src/pages/onboarding/steps/LimitationsStep.tsx
-
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import type { StepProps } from '@/types/app.types'
@@ -10,7 +8,7 @@ export function LimitationsStep({ onNext }: StepProps) {
 
   const handleContinue = () => {
     onNext({
-      limitations: hasLimitations && text.trim() ? text.trim() : null,
+      limitations: hasLimitations && text.trim() ? text.trim() : undefined,
     })
   }
 
@@ -24,6 +22,7 @@ export function LimitationsStep({ onNext }: StepProps) {
           We'll program around them.
         </p>
       </div>
+
       <div className="flex flex-col gap-3">
         <button
           onClick={() => setHasLimitations(false)}
@@ -33,17 +32,14 @@ export function LimitationsStep({ onNext }: StepProps) {
               : 'border-surface bg-surface'
           }`}
         >
-          <p
-            className={`font-bold text-base ${
-              hasLimitations === false ? 'text-accent' : 'text-text-primary'
-            }`}
-          >
+          <p className={`font-bold text-base ${hasLimitations === false ? 'text-accent' : 'text-text-primary'}`}>
             No, all good
           </p>
           <p className="text-text-secondary text-sm mt-0.5">
             No pain, injuries, or restrictions
           </p>
         </button>
+
         <button
           onClick={() => setHasLimitations(true)}
           className={`p-4 rounded-card border-2 text-left transition-all duration-150 active:scale-[0.98] ${
@@ -52,11 +48,7 @@ export function LimitationsStep({ onNext }: StepProps) {
               : 'border-surface bg-surface'
           }`}
         >
-          <p
-            className={`font-bold text-base ${
-              hasLimitations === true ? 'text-accent' : 'text-text-primary'
-            }`}
-          >
+          <p className={`font-bold text-base ${hasLimitations === true ? 'text-accent' : 'text-text-primary'}`}>
             Yes, I have some
           </p>
           <p className="text-text-secondary text-sm mt-0.5">
