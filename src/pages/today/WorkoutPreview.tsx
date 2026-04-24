@@ -4,16 +4,18 @@ import { CueCard } from '@/components/workout/CueCard'
 import { Button } from '@/components/ui/Button'
 import { PillButton } from '@/components/ui/PillButton'
 import { sessionTypeLabel } from '@/lib/workoutEngine'
-import type { Exercise, SessionType } from '@/types/app.types'
+import type { Exercise, SessionType, TimeSlot } from '@/types/app.types'
+import type { SessionConfig } from '@/lib/workoutEngine'
 
 interface Props {
   sessionType: SessionType
-  timeAvailable: 30 | 45 | 60
+  timeSlot: TimeSlot
   warmup: Exercise[]
   main: Exercise[]
   cooldown: Exercise[]
+  config: SessionConfig
   knownExerciseIds: Set<string>
-  onTimeChange: (t: 30 | 45 | 60) => void
+  onTimeChange: (t: TimeSlot) => void
   onStart: () => void
   isStarting: boolean
 }
@@ -25,10 +27,12 @@ function ExerciseRow({
   exercise: Exercise
   showCue: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between py-2">
-        <div>
+        <div className="flex-1">
           <p className="text-text-primary font-bold text-base">{exercise.name}</p>
           <p className="text-text-secondary text-xs mt-0.5">
             {exercise.target_duration_seconds
@@ -38,34 +42,57 @@ function ExerciseRow({
               : ''}
           </p>
         </div>
-        {showCue && (
-          <span className="text-accent text-xs font-bold tracking-widest bg-surface-raised px-2 py-1 rounded-pill">
-            NEW
-          </span>
-        )}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="text-text-disabled text-xs font-bold tracking-widest bg-surface-raised px-2 py-1 rounded-pill ml-2"
+        >
+          {expanded ? 'HIDE' : 'TECHNIQUE'}
+        </button>
       </div>
-      {showCue && <CueCard exercise={exercise} />}
+      {expanded && <CueCard exercise={exercise} />}
     </div>
   )
 }
 
+function estimateMinutes(
+  warmupCount: number,
+  mainCount: number,
+  cooldownCount: number,
+  sets: number,
+  restSeconds: number
+): number {
+  const warmupTime = warmupCount * 60
+  const cooldownTime = cooldownCount * 60
+  const mainTime = mainCount * (sets * 45 + (sets - 1) * restSeconds + 30)
+  return Math.round((warmupTime + cooldownTime + mainTime) / 60)
+}
+
 export function WorkoutPreview({
   sessionType,
-  timeAvailable,
+  timeSlot,
   warmup,
   main,
   cooldown,
+  config,
   knownExerciseIds,
   onTimeChange,
   onStart,
   isStarting,
 }: Props) {
-  const [expandedSections, setExpandedSections] = useState<
-    Record<string, boolean>
-  >({ warmup: false, main: true, cooldown: false })
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(
+    { warmup: false, main: true, cooldown: false }
+  )
 
   const toggle = (key: string) =>
     setExpandedSections((s) => ({ ...s, [key]: !s[key] }))
+
+  const estimatedMins = estimateMinutes(
+    warmup.length,
+    main.length,
+    cooldown.length,
+    config.setsPerExercise,
+    config.baseRestSeconds
+  )
 
   const SectionHeader = ({
     label,
@@ -97,7 +124,7 @@ export function WorkoutPreview({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-col gap-4 pt-6 pb-8"
+      className="flex flex-col gap-4 pb-8"
     >
       {/* Session type heading */}
       <div>
@@ -105,7 +132,7 @@ export function WorkoutPreview({
           {sessionTypeLabel(sessionType)}
         </h1>
         <p className="text-text-secondary text-sm mt-1">
-          {warmup.length + main.length + cooldown.length} exercises total
+          {warmup.length + main.length + cooldown.length} exercises · {config.setsPerExercise} sets — ~{estimatedMins} min
         </p>
       </div>
 
@@ -114,12 +141,12 @@ export function WorkoutPreview({
         <p className="text-text-secondary text-xs font-bold tracking-widest mb-3">
           TIME AVAILABLE
         </p>
-        <div className="flex gap-2">
-          {([30, 45, 60] as const).map((t) => (
+        <div className="flex gap-2 flex-wrap">
+          {([30, 45, 60, 'no_rush'] as const).map((t) => (
             <PillButton
               key={t}
-              label={t === 60 ? '60 MIN+' : `${t} MIN`}
-              selected={timeAvailable === t}
+              label={t === 60 ? '60 MIN+' : t === 'no_rush' ? 'NO RUSH' : `${t} MIN`}
+              selected={timeSlot === t}
               onClick={() => onTimeChange(t)}
             />
           ))}
@@ -130,11 +157,7 @@ export function WorkoutPreview({
       <div className="bg-surface rounded-card p-4 flex flex-col">
         {/* Warmup */}
         <div className="border-b border-surface-raised">
-          <SectionHeader
-            label="WARM-UP"
-            count={warmup.length}
-            sectionKey="warmup"
-          />
+          <SectionHeader label="WARM-UP" count={warmup.length} sectionKey="warmup" />
           {expandedSections.warmup && (
             <div className="flex flex-col divide-y divide-surface-raised pb-2">
               {warmup.map((ex) => (
@@ -166,11 +189,7 @@ export function WorkoutPreview({
 
         {/* Cooldown */}
         <div>
-          <SectionHeader
-            label="COOL-DOWN"
-            count={cooldown.length}
-            sectionKey="cooldown"
-          />
+          <SectionHeader label="COOL-DOWN" count={cooldown.length} sectionKey="cooldown" />
           {expandedSections.cooldown && (
             <div className="flex flex-col divide-y divide-surface-raised pb-2">
               {cooldown.map((ex) => (
