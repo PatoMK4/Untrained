@@ -12,6 +12,15 @@ export type BodyFocus = 'lose' | 'maintain' | 'build'
 export type WeightUnit = 'kg' | 'lbs'
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack'
 
+// Split preference — user selects during onboarding
+export type SplitPreference = 'full_body' | 'ppl' | 'upper_lower' | 'bro_split'
+
+// Per-movement fitness level — 1=beginner, 2=novice, 3=intermediate, 4=advanced
+export type MovementLevel = 1 | 2 | 3 | 4
+
+// Time slot for session selection
+export type TimeSlot = 30 | 45 | 60 | 'no_rush'
+
 // ── User ────────────────────────────────────────────────────────────────────
 export interface UserProfile {
   id: string
@@ -28,6 +37,12 @@ export interface UserProfile {
   squat_benchmark: number
   squat_type: 'hold' | 'jumps'
   squat_effort: Effort
+  split_preference: SplitPreference
+  level_push: MovementLevel
+  level_pull: MovementLevel
+  level_squat: MovementLevel
+  level_hinge: MovementLevel
+  level_core: MovementLevel
   onboarding_complete: boolean
   created_at: string
 }
@@ -174,7 +189,7 @@ export interface OnboardingData {
   training_days?: number
   environment?: Environment
   equipment?: Equipment[]
-  limitations?: string
+  limitations?: string | null
   pushup_benchmark?: number
   pushup_effort?: Effort
   pullup_benchmark?: number
@@ -182,6 +197,12 @@ export interface OnboardingData {
   squat_benchmark?: number
   squat_type?: 'hold' | 'jumps'
   squat_effort?: Effort
+  split_preference?: SplitPreference
+  level_push?: MovementLevel
+  level_pull?: MovementLevel
+  level_squat?: MovementLevel
+  level_hinge?: MovementLevel
+  level_core?: MovementLevel
 }
 
 export interface StepProps {
