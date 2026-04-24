@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Wordmark } from '@/components/ui/Wordmark'
 import { WorkoutPreview } from './WorkoutPreview'
@@ -35,7 +35,6 @@ export default function TodayPage() {
   const createSession = useCreateSession()
   const { startSession, isActive, endSession } = useSessionStore()
 
-  // Track how many sessions the user has completed — used to avoid rest day on first use
   const { data: completedSessionCount } = useQuery({
     queryKey: ['completed_session_count', user?.id],
     queryFn: async () => {
@@ -45,20 +44,6 @@ export default function TodayPage() {
         .eq('user_id', user!.id)
         .eq('status', 'completed')
       return count ?? 0
-    },
-    enabled: !!user,
-  })
-
-  const { data: knownExerciseIds } = useQuery({
-    queryKey: ['known_exercises', user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('exercise_logs')
-        .select('exercise_id')
-        .eq('user_id', user!.id)
-      const ids = new Set<string>()
-      for (const row of data ?? []) ids.add(row.exercise_id)
-      return ids
     },
     enabled: !!user,
   })
@@ -77,7 +62,6 @@ export default function TodayPage() {
     }
   }, [profile, progressionMap])
 
-  // Session type — passes completedSessionCount so first-timers never get a rest day
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
     return getSessionType(
@@ -153,8 +137,6 @@ export default function TodayPage() {
     }
   }
 
-  // RecoveryDay passes exercises + sets — we create the DB session here in the parent
-  // so we have the session ID before calling startSession
   const handleStartRecoverySession = async (
     recoveryExercises: Exercise[],
     setsPerExercise: number
@@ -172,7 +154,6 @@ export default function TodayPage() {
   }
 
   const handleFullRest = async () => {
-    // Log a skipped session so streak logic knows user was intentional
     if (user) {
       await supabase.from('workout_sessions').insert({
         user_id: user.id,
@@ -234,7 +215,6 @@ export default function TodayPage() {
                 main={workout.main}
                 cooldown={workout.cooldown}
                 config={workout.config}
-                knownExerciseIds={knownExerciseIds ?? new Set()}
                 onTimeChange={setTimeSlot}
                 onStart={handleStartSession}
                 isStarting={createSession.isPending}
