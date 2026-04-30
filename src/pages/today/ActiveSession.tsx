@@ -7,6 +7,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useLogSet, useRecentLogs } from '@/hooks/useWorkout'
 import { calculateRestSeconds } from '@/lib/workoutEngine'
 import type { Effort, MovementPattern } from '@/types/app.types'
+import { ChatPanel } from '@/components/chat/ChatPanel'
 
 interface Props {
   onSessionEnd: () => void
@@ -234,6 +235,8 @@ export function ActiveSession({ onSessionEnd }: Props) {
           )}
         </AnimatePresence>
       </div>
+
+      <ChatPanel sessionId={sessionId} />
 
       {!showRestTimer && (
         <button
