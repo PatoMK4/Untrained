@@ -26,14 +26,16 @@ export default function TodayPage() {
   const { user } = useAuthStore()
   const [view, setView] = useState<View>('preview')
   const [timeSlot, setTimeSlot] = useState<TimeSlot>(45)
-  
+  // Track whether we navigated to post ourselves so the useEffect
+  // does not immediately re-trigger on todaySession status change
+  const [sessionJustCompleted, setSessionJustCompleted] = useState(false)
 
   const { data: exercises, isLoading: loadingEx } = useExercises()
   const { data: progressionMap, isLoading: loadingProg } = useProgression()
   const { data: profile, isLoading: loadingProfile } = useUserProfile()
   const { data: todaySession } = useTodaySession()
   const createSession = useCreateSession()
-  const { startSession, isActive, endSession } = useSessionStore()
+  const { startSession, isActive } = useSessionStore()
 
   const { data: completedSessionCount } = useQuery({
     queryKey: ['completed_session_count', user?.id],
@@ -98,14 +100,18 @@ export default function TodayPage() {
   )
 
   useEffect(() => {
-    if (todaySession?.status === 'completed') {
+    // Do not react to todaySession changes if we just completed a session
+    // ourselves — PostWorkout is already mounted and handling the save.
+    if (sessionJustCompleted) return
+
+    if (todaySession?.status === 'completed' && view !== 'post') {
       setView('post')
-    } else if (todaySession?.status === 'in_progress' && isActive) {
+    } else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') {
       setView('active')
     } else if (isRestDay && view === 'preview') {
       setView('recovery')
     }
-  }, [todaySession, isActive, isRestDay])
+  }, [todaySession, isActive, isRestDay, sessionJustCompleted])
 
   const isLoading = loadingEx || loadingProg || loadingProfile || completedSessionCount === undefined
 
@@ -168,14 +174,20 @@ export default function TodayPage() {
         exercises_completed: [],
       })
     }
+    setSessionJustCompleted(true)
     setView('post')
-    
   }
 
+  // Called from ActiveSession when all exercises are done
+  const handleSessionEnd = () => {
+    setSessionJustCompleted(true)
+    setView('post')
+  }
+
+  // Called from PostWorkout after all saves are complete and endSession() has run
   const handleDone = () => {
-    endSession()
+    setSessionJustCompleted(false)
     setView(isRestDay ? 'recovery' : 'preview')
-    
   }
 
   const hour = new Date().getHours()
@@ -204,7 +216,7 @@ export default function TodayPage() {
             {allExercises.length === 0 ? (
               <div className="bg-surface rounded-card p-5">
                 <p className="text-text-secondary">
-                  No exercises found. Make sure your exercise library is seeded in Supabase.
+                  No exercises found for today's session type. Check Supabase exercise library.
                 </p>
               </div>
             ) : (
@@ -225,7 +237,7 @@ export default function TodayPage() {
 
         {view === 'active' && (
           <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <ActiveSession onSessionEnd={() => setView('post')} />
+            <ActiveSession onSessionEnd={handleSessionEnd} />
           </motion.div>
         )}
 
