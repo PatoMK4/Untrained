@@ -62,7 +62,8 @@ export default function App() {
       <Routes>
         <Route path="/auth" element={<AuthPage />} />
         <Route
-          path="/onboarding"
+          path="/auth/confirmed" element={<EmailConfirmedPage />} />
+        <Route path="/onboarding"
           element={
             user ? <OnboardingFlow /> : <Navigate to="/auth" replace />
           }
