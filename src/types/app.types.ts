@@ -209,6 +209,7 @@ export interface StepProps {
   onNext: (data: Partial<OnboardingData>) => void
   onBack?: () => void
   data: OnboardingData
+  submitting?: boolean
 }
 
 // ── Achievements ─────────────────────────────────────────────────────────────
