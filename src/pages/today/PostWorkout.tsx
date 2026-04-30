@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/Button'
 import { estimateCalories } from '@/lib/workoutEngine'
@@ -8,20 +8,19 @@ import { awardSessionScore } from '@/lib/scoreEngine'
 import { useAuthStore } from '@/stores/authStore'
 
 interface Props {
-  scoreAwarded: number
   onDone: () => void
 }
 
-export function PostWorkout({ scoreAwarded, onDone }: Props) {
+export function PostWorkout({ onDone }: Props) {
   const { user } = useAuthStore()
-  const { logs, painFlags, endSession } = useSessionStore()
+  const { logs, painFlags, exercises, endSession } = useSessionStore()
   const completeSession = useCompleteSession()
 
-  const [painResponse, setPainResponse] = useState<
-    'none' | 'minor' | 'hurt' | null
-  >(null)
+  const [painResponse, setPainResponse] = useState<'none' | 'minor' | 'hurt' | null>(null)
   const [painNote, setPainNote] = useState('')
   const [isDone, setIsDone] = useState(false)
+  const [scoreAwarded, setScoreAwarded] = useState(0)
+  const [saving, setSaving] = useState(false)
 
   const showPainCheck = painFlags.length > 0
 
@@ -30,36 +29,70 @@ export function PostWorkout({ scoreAwarded, onDone }: Props) {
   const avgReps = totalSets > 0 ? totalReps / totalSets : 0
   const estimatedCals = estimateCalories(totalSets, avgReps)
 
-  const handleDone = async () => {
-    setIsDone(true)
-    try {
-      const sessionId = useSessionStore.getState().sessionId
-      if (sessionId && user) {
-        const painFlagged = painResponse === 'hurt' || painResponse === 'minor'
-        const exercisesCompleted = [
-          ...new Set(logs.map((l) => l.exerciseId)),
-        ]
+  // Check if warmup and cooldown were completed
+  const hasWarmup = exercises.some((e) => e.is_warmup)
+  const hasCooldown = exercises.some((e) => e.is_cooldown)
+  const warmupLogged = hasWarmup && logs.some((l) =>
+    exercises.find((e) => e.id === l.exerciseId && e.is_warmup)
+  )
+  const cooldownLogged = hasCooldown && logs.some((l) =>
+    exercises.find((e) => e.id === l.exerciseId && e.is_cooldown)
+  )
+  const fullBookends = warmupLogged && cooldownLogged
 
+  // Save session to Supabase immediately when PostWorkout mounts
+  useEffect(() => {
+    const saveSession = async () => {
+      const sessionId = useSessionStore.getState().sessionId
+      if (!sessionId || !user || saving) return
+      setSaving(true)
+      try {
+        const exercisesCompleted = [...new Set(logs.map((l) => l.exerciseId))]
         await completeSession.mutateAsync({
           sessionId,
           totalSets,
           totalReps,
           exercisesCompleted,
-          painNote: painFlagged && painNote ? painNote : undefined,
-          painFlagged,
+          painNote: undefined,
+          painFlagged: false,
         })
-
-        await awardSessionScore(user.id, sessionId, {
+        const points = await awardSessionScore(user.id, sessionId, {
           progressionUnlocked: false,
-          fullBookends: true,
+          fullBookends,
         })
+        setScoreAwarded(points)
+      } catch (err) {
+        console.error('Error saving session:', err)
+      } finally {
+        setSaving(false)
       }
-    } catch (err) {
-      console.error('Error completing session:', err)
-    } finally {
-      endSession()
-      onDone()
     }
+    saveSession()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleDone = async () => {
+    setIsDone(true)
+    // If pain was flagged, update the session with pain note
+    const sessionId = useSessionStore.getState().sessionId
+    if (sessionId && user && painFlags.length > 0 && painResponse !== null) {
+      try {
+        await completeSession.mutateAsync({
+          sessionId,
+          totalSets,
+          totalReps,
+          exercisesCompleted: [...new Set(logs.map((l) => l.exerciseId))],
+          painNote: (painResponse === 'minor' || painResponse === 'hurt') && painNote
+            ? painNote
+            : undefined,
+          painFlagged: painResponse === 'minor' || painResponse === 'hurt',
+        })
+      } catch (err) {
+        console.error('Error updating pain data:', err)
+      }
+    }
+    endSession()
+    onDone()
   }
 
   return (
@@ -69,55 +102,39 @@ export function PostWorkout({ scoreAwarded, onDone }: Props) {
       transition={{ duration: 0.4 }}
       className="flex flex-col gap-6 pt-10 pb-8"
     >
-      {/* Heading */}
       <div>
-        <h1 className="text-4xl font-black text-text-primary">
-          SESSION COMPLETE.
-        </h1>
-        <p className="text-text-secondary text-sm mt-1">
-          Every set counts. Good work.
-        </p>
+        <h1 className="text-4xl font-black text-text-primary">SESSION COMPLETE.</h1>
+        <p className="text-text-secondary text-sm mt-1">Every set counts. Good work.</p>
       </div>
 
       {/* Stats card */}
       <div className="bg-surface rounded-card p-5 flex flex-col gap-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <p className="text-text-disabled text-xs tracking-widest">
-              TOTAL SETS
-            </p>
-            <p className="text-text-primary font-black text-3xl mt-1">
-              {totalSets}
-            </p>
+            <p className="text-text-disabled text-xs tracking-widest">TOTAL SETS</p>
+            <p className="text-text-primary font-black text-3xl mt-1">{totalSets}</p>
           </div>
           <div>
-            <p className="text-text-disabled text-xs tracking-widest">
-              TOTAL REPS
-            </p>
-            <p className="text-text-primary font-black text-3xl mt-1">
-              {totalReps}
-            </p>
+            <p className="text-text-disabled text-xs tracking-widest">TOTAL REPS</p>
+            <p className="text-text-primary font-black text-3xl mt-1">{totalReps}</p>
           </div>
           <div>
-            <p className="text-text-disabled text-xs tracking-widest">
-              EST. CALORIES
-            </p>
-            <p className="text-text-primary font-black text-3xl mt-1">
-              ~{estimatedCals}
-            </p>
+            <p className="text-text-disabled text-xs tracking-widest">EST. CALORIES</p>
+            <p className="text-text-primary font-black text-3xl mt-1">~{estimatedCals}</p>
           </div>
           <div>
-            <p className="text-text-disabled text-xs tracking-widest">
-              SCORE
-            </p>
+            <p className="text-text-disabled text-xs tracking-widest">SCORE</p>
             <p className="text-accent font-black text-3xl mt-1">
-              +{scoreAwarded}
+              {saving ? '...' : `+${scoreAwarded}`}
             </p>
           </div>
         </div>
+        {fullBookends && (
+          <p className="text-accent text-xs font-bold">+5 BONUS — WARM-UP & COOL-DOWN COMPLETED</p>
+        )}
       </div>
 
-      {/* Pain check — ONLY if pain was flagged during session */}
+      {/* Pain check */}
       {showPainCheck && painResponse === null && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -150,16 +167,13 @@ export function PostWorkout({ scoreAwarded, onDone }: Props) {
         </motion.div>
       )}
 
-      {/* Pain note input */}
       {(painResponse === 'minor' || painResponse === 'hurt') && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
           className="bg-surface rounded-card p-4"
         >
-          <p className="text-text-secondary text-sm mb-2">
-            Where did you feel it?
-          </p>
+          <p className="text-text-secondary text-sm mb-2">Where did you feel it?</p>
           <input
             type="text"
             value={painNote}
@@ -167,27 +181,16 @@ export function PostWorkout({ scoreAwarded, onDone }: Props) {
             placeholder="e.g. left shoulder, lower back"
             className="w-full h-12 bg-surface-raised rounded-card px-4 text-text-primary text-sm border border-text-disabled focus:border-accent outline-none"
           />
-          <p className="text-text-disabled text-xs mt-2">
-            We'll keep this in mind for your next session.
-          </p>
+          <p className="text-text-disabled text-xs mt-2">We will keep this in mind for your next session.</p>
         </motion.div>
       )}
 
-      {/* Confirmation if "all good" */}
       {painResponse === 'none' && (
-        <p className="text-success text-sm text-center font-bold">
-          ✓ Noted — nothing to flag.
-        </p>
+        <p className="text-success text-sm text-center font-bold">✓ Noted — nothing to flag.</p>
       )}
 
-      {/* Done button */}
       {(painResponse !== null || !showPainCheck) && (
-        <Button
-          fullWidth
-          size="lg"
-          loading={isDone}
-          onClick={handleDone}
-        >
+        <Button fullWidth size="lg" loading={isDone || saving} onClick={handleDone}>
           DONE
         </Button>
       )}

@@ -32,13 +32,16 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const logSetMutation = useLogSet()
   const currentExercise = exercises[currentExerciseIndex]
   const isLastExercise = currentExerciseIndex === exercises.length - 1
-  const isLastSet = currentSetNumber >= totalSets
+
+  // isLastSet: true when we have already logged the final set
+  // currentSetNumber is incremented by nextSet() AFTER logging,
+  // so when showRestTimer is true and currentSetNumber > totalSets
+  // that means we just finished the last set.
+  const isLastSet = currentSetNumber > totalSets
 
   const { data: recentLogs } = useRecentLogs(currentExercise?.id ?? null)
   const lastSessionReps = recentLogs && recentLogs.length > 0 ? recentLogs[0].reps : null
 
-  // Dynamic rest time — calculated from last effort + muscle group + time slot
-  // Science: KB Section 3 — autoregulation algorithm
   const dynamicRestSeconds = useMemo(() => {
     if (!currentExercise) return 75
     const lastEffort = lastEffortByExercise[currentExercise.id] ?? null
@@ -51,8 +54,6 @@ export function ActiveSession({ onSessionEnd }: Props) {
     )
   }, [currentExercise, lastEffortByExercise, consecutiveHardByExercise, timeSlot])
 
-  // OTS warning — 3+ consecutive hard sets for same exercise
-  // Science: KB Section 10 — OTS early warning; suggest regression
   const consecutiveHard = currentExercise
     ? (consecutiveHardByExercise[currentExercise.id] ?? 0)
     : 0
@@ -93,19 +94,26 @@ export function ActiveSession({ onSessionEnd }: Props) {
       skip_reason: null,
     })
 
-    // Pass effort to nextSet so store can track consecutive hard sets
+    // nextSet increments currentSetNumber and shows rest timer
     nextSet(effort, currentExercise.id)
   }
 
+  // Dismiss rest timer — go back to set logger for next set
   const handleRestDone = () => {
     setShowRestTimer(false)
   }
 
+  // Advance to next exercise — called explicitly by user after last set rest
   const handleNextExercise = () => {
-    nextExercise()
-    setShowRestTimer(false)
+    if (isLastExercise) {
+      // All exercises done — end session
+      onSessionEnd()
+    } else {
+      nextExercise()
+    }
   }
 
+  // Session fully complete (no more exercises)
   if (!currentExercise) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] gap-6">
@@ -137,7 +145,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </span>
       </div>
 
-      {/* Exercise name + last session context */}
+      {/* Exercise name */}
       <AnimatePresence mode="wait">
         <motion.div
           key={currentExercise.id}
@@ -158,7 +166,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </motion.div>
       </AnimatePresence>
 
-      {/* Regression warning — shown when 3+ consecutive hard sets */}
+      {/* Regression warning */}
       {showRegressionWarning && !showRestTimer && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
@@ -171,7 +179,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </motion.div>
       )}
 
-      {/* Main content — set logger or rest timer */}
+      {/* Main content */}
       <div className="flex-1 flex flex-col justify-center">
         <AnimatePresence mode="wait">
           {showRestTimer ? (
@@ -189,12 +197,12 @@ export function ActiveSession({ onSessionEnd }: Props) {
                 onComplete={handleRestDone}
               />
 
-              {/* Show rest time label so user knows why it's longer/shorter */}
               <p className="text-text-disabled text-xs text-center">
                 {dynamicRestSeconds}s rest
                 {consecutiveHard >= 2 ? ' — extended for recovery' : ''}
               </p>
 
+              {/* After last set: show advance button. During mid-set rest: show set progress */}
               {isLastSet ? (
                 <Button fullWidth size="lg" onClick={handleNextExercise}>
                   {isLastExercise ? 'FINISH SESSION →' : 'NEXT EXERCISE →'}

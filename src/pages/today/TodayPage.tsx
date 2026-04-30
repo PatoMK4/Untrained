@@ -26,7 +26,7 @@ export default function TodayPage() {
   const { user } = useAuthStore()
   const [view, setView] = useState<View>('preview')
   const [timeSlot, setTimeSlot] = useState<TimeSlot>(45)
-  const [scoreAwarded, setScoreAwarded] = useState(0)
+  
 
   const { data: exercises, isLoading: loadingEx } = useExercises()
   const { data: progressionMap, isLoading: loadingProg } = useProgression()
@@ -169,13 +169,13 @@ export default function TodayPage() {
       })
     }
     setView('post')
-    setScoreAwarded(0)
+    
   }
 
   const handleDone = () => {
     endSession()
     setView(isRestDay ? 'recovery' : 'preview')
-    setScoreAwarded(0)
+    
   }
 
   const hour = new Date().getHours()
@@ -231,7 +231,7 @@ export default function TodayPage() {
 
         {view === 'post' && (
           <motion.div key="post" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <PostWorkout scoreAwarded={scoreAwarded} onDone={handleDone} />
+            <PostWorkout onDone={handleDone} />
           </motion.div>
         )}
 
