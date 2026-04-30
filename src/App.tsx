@@ -5,8 +5,8 @@ import { supabase } from '@/lib/supabase'
 import { AppShell } from '@/components/layout/AppShell'
 import { AuthPage } from '@/pages/AuthPage'
 import TodayPage from '@/pages/today/TodayPage'
-import { ProgressPlaceholder } from '@/pages/placeholders/ProgressPlaceholder'
-import { ProfilePlaceholder } from '@/pages/placeholders/ProfilePlaceholder'
+import ProgressPage from '@/pages/progress/ProgressPage'
+import ProfilePage from '@/pages/profile/ProfilePage'
 import OnboardingFlow from '@/pages/onboarding/OnboardingFlow'
 import { EmailConfirmedPage } from '@/pages/EmailConfirmedPage'
 
@@ -77,8 +77,8 @@ export default function App() {
           }
         >
           <Route index element={<TodayPage />} />
-          <Route path="progress" element={<ProgressPlaceholder />} />
-          <Route path="profile" element={<ProfilePlaceholder />} />
+          <Route path="progress" element={<ProgressPage />} />
+          <Route path="profile" element={<ProfilePage />} />
         </Route>
       </Routes>
     </BrowserRouter>
