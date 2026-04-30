@@ -7,7 +7,7 @@ import { AuthPage } from '@/pages/AuthPage'
 import TodayPage from '@/pages/today/TodayPage'
 import { ProgressPlaceholder } from '@/pages/placeholders/ProgressPlaceholder'
 import { ProfilePlaceholder } from '@/pages/placeholders/ProfilePlaceholder'
-import { OnboardingFlow } from '@/pages/onboarding/OnboardingFlow'
+import OnboardingFlow from '@/pages/onboarding/OnboardingFlow'
 
 function LoadingScreen() {
   return (

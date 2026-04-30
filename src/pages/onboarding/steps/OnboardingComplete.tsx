@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import type { StepProps } from '@/types/app.types'
 
 interface OnboardingCompleteProps extends StepProps {
+  submitting?: boolean
   loading?: boolean
 }
 
