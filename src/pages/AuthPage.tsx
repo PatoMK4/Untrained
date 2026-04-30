@@ -1,4 +1,4 @@
-﻿// src/pages/AuthPage.tsx
+// src/pages/AuthPage.tsx
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
@@ -19,6 +19,7 @@ export function AuthPage() {
   const [resetEmail, setResetEmail] = useState('')
   const [resetSent, setResetSent] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
+  const [signupPending, setSignupPending] = useState(false)
 
   const handleEmailAuth = async () => {
     setError(null)
@@ -33,10 +34,11 @@ export function AuthPage() {
       const { error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
-        options: { emailRedirectTo: window.location.origin },
+        options: { emailRedirectTo: `${window.location.origin}/auth/confirmed` },
       })
-      if (signUpError) { setError(signUpError.message); setLoading(false); return }
-      navigate('/', { replace: true })
+      setLoading(false)
+      if (signUpError) { setError(signUpError.message); return }
+      setSignupPending(true)
     } else {
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
@@ -84,6 +86,33 @@ export function AuthPage() {
     if (e.key === 'Enter') handleEmailAuth()
   }
 
+  // Signup pending - waiting for email confirmation
+  if (signupPending) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 gap-8 text-center">
+        <Wordmark size="xl" />
+        <div className="flex flex-col gap-3">
+          <p className="text-5xl">✉️</p>
+          <h1 className="text-2xl font-black text-text-primary">Check your email.</h1>
+          <p className="text-text-secondary text-sm">
+            We sent a confirmation link to
+          </p>
+          <p className="text-text-primary font-bold text-sm">{email}</p>
+          <p className="text-text-secondary text-sm">
+            Click the link in the email to confirm your account, then come back and sign in.
+          </p>
+        </div>
+        <button
+          onClick={() => { setSignupPending(false); setMode('signin') }}
+          className="text-accent text-sm font-bold min-h-[44px] px-4"
+        >
+          Back to sign in
+        </button>
+      </div>
+    )
+  }
+
+  // Password reset screen
   if (showReset) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 gap-8">
@@ -121,8 +150,7 @@ export function AuthPage() {
               onChange={(e) => setResetEmail(e.target.value)}
               placeholder="your@email.com"
               autoComplete="email"
-              className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary
-                border border-surface-raised focus:border-accent outline-none text-base"
+              className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary border border-surface-raised focus:border-accent outline-none text-base"
             />
             <Button fullWidth loading={resetLoading} onClick={handlePasswordReset}>
               SEND RESET LINK
@@ -145,20 +173,16 @@ export function AuthPage() {
         <Wordmark size="xl" />
         <p className="text-text-disabled text-sm tracking-widest">TRAIN. PROGRESS. REPEAT.</p>
       </div>
-
       <div className="w-full max-w-sm flex flex-col gap-4">
         {error && (
           <div className="p-3 bg-surface border border-red-500 rounded-xl">
             <p className="text-red-400 text-sm">{error}</p>
           </div>
         )}
-
         <button
           onClick={handleGoogle}
           disabled={googleLoading || loading}
-          className="w-full h-12 bg-white rounded-pill flex items-center justify-center gap-3
-            font-bold text-sm text-gray-800 active:brightness-95 transition-all
-            disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full h-12 bg-white rounded-pill flex items-center justify-center gap-3 font-bold text-sm text-gray-800 active:brightness-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {googleLoading ? (
             <span className="animate-spin text-gray-500">◌</span>
@@ -172,13 +196,11 @@ export function AuthPage() {
           )}
           {googleLoading ? 'Redirecting...' : 'Continue with Google'}
         </button>
-
         <div className="flex items-center gap-3">
           <div className="flex-1 h-px bg-surface-raised" />
           <span className="text-text-disabled text-xs">or</span>
           <div className="flex-1 h-px bg-surface-raised" />
         </div>
-
         <input
           type="email"
           value={email}
@@ -186,10 +208,8 @@ export function AuthPage() {
           onKeyDown={handleKeyDown}
           placeholder="Email address"
           autoComplete="email"
-          className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary
-            border border-surface-raised focus:border-accent outline-none text-base"
+          className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary border border-surface-raised focus:border-accent outline-none text-base"
         />
-
         <input
           type="password"
           value={password}
@@ -197,24 +217,19 @@ export function AuthPage() {
           onKeyDown={handleKeyDown}
           placeholder={mode === 'signup' ? 'Create a password (min 6 chars)' : 'Password'}
           autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary
-            border border-surface-raised focus:border-accent outline-none text-base"
+          className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary border border-surface-raised focus:border-accent outline-none text-base"
         />
-
         {mode === 'signin' && (
           <button
             onClick={() => { setShowReset(true); setResetEmail(email); setError(null) }}
-            className="text-text-secondary text-sm text-right -mt-2 min-h-[44px]
-              flex items-center justify-end"
+            className="text-text-secondary text-sm text-right -mt-2 min-h-[44px] flex items-center justify-end"
           >
             Forgot password?
           </button>
         )}
-
         <Button fullWidth loading={loading} onClick={handleEmailAuth}>
           {mode === 'signup' ? 'CREATE ACCOUNT' : 'SIGN IN'}
         </Button>
-
         <div className="flex items-center justify-center gap-1">
           <span className="text-text-secondary text-sm">
             {mode === 'signin' ? "Don't have an account?" : 'Already have an account?'}

@@ -8,6 +8,7 @@ import TodayPage from '@/pages/today/TodayPage'
 import { ProgressPlaceholder } from '@/pages/placeholders/ProgressPlaceholder'
 import { ProfilePlaceholder } from '@/pages/placeholders/ProfilePlaceholder'
 import OnboardingFlow from '@/pages/onboarding/OnboardingFlow'
+import { EmailConfirmedPage } from '@/pages/EmailConfirmedPage'
 
 function LoadingScreen() {
   return (
