@@ -2,15 +2,13 @@ import { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Wordmark } from '@/components/ui/Wordmark'
 import { WorkoutPreview } from './WorkoutPreview'
+import type { Readiness } from './WorkoutPreview'
 import { ActiveSession } from './ActiveSession'
 import { PostWorkout } from './PostWorkout'
 import { RecoveryDay } from './RecoveryDay'
 import {
-  useExercises,
-  useProgression,
-  useUserProfile,
-  useTodaySession,
-  useCreateSession,
+  useExercises, useProgression, useUserProfile,
+  useTodaySession, useCreateSession,
 } from '@/hooks/useWorkout'
 import { useSessionStore } from '@/stores/sessionStore'
 import { buildWorkout, getSessionType } from '@/lib/workoutEngine'
@@ -18,16 +16,15 @@ import type { TimeSlot, SplitPreference } from '@/lib/workoutEngine'
 import type { MovementPattern, SessionType, Exercise } from '@/types/app.types'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 type View = 'preview' | 'active' | 'post' | 'recovery'
 
 export default function TodayPage() {
   const { user } = useAuthStore()
+  const queryClient = useQueryClient()
   const [view, setView] = useState<View>('preview')
   const [timeSlot, setTimeSlot] = useState<TimeSlot>(45)
-  // Track whether we navigated to post ourselves so the useEffect
-  // does not immediately re-trigger on todaySession status change
   const [sessionJustCompleted, setSessionJustCompleted] = useState(false)
 
   const { data: exercises, isLoading: loadingEx } = useExercises()
@@ -50,8 +47,36 @@ export default function TodayPage() {
     enabled: !!user,
   })
 
-  const splitPreference: SplitPreference =
-    (profile?.split_preference as SplitPreference) ?? 'full_body'
+  const { data: lastSessionData } = useQuery({
+    queryKey: ['last_session', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('workout_sessions')
+        .select('date, pain_flagged, pain_note')
+        .eq('user_id', user!.id)
+        .eq('status', 'completed')
+        .order('date', { ascending: false })
+        .limit(1)
+        .single()
+      return data
+    },
+    enabled: !!user,
+  })
+
+  const isComeback = useMemo(() => {
+    if (!lastSessionData?.date) return false
+    const daysDiff = (Date.now() - new Date(lastSessionData.date as string).getTime()) / (1000 * 60 * 60 * 24)
+    return daysDiff >= 4
+  }, [lastSessionData])
+
+  const painFollowUp = useMemo(() => {
+    if (!lastSessionData) return null
+    const rec = lastSessionData as Record<string, unknown>
+    if (!rec.pain_flagged) return null
+    return { note: typeof rec.pain_note === 'string' && rec.pain_note ? rec.pain_note : 'the discomfort you mentioned' }
+  }, [lastSessionData])
+
+  const splitPreference: SplitPreference = (profile?.split_preference as SplitPreference) ?? 'full_body'
 
   const effectiveProgressionMap = useMemo((): Record<MovementPattern, number> => {
     const p = profile as Record<string, number> | undefined
@@ -66,12 +91,7 @@ export default function TodayPage() {
 
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
-    return getSessionType(
-      profile.training_days,
-      splitPreference,
-      profile.created_at,
-      completedSessionCount ?? 0
-    )
+    return getSessionType(profile.training_days, splitPreference, profile.created_at, completedSessionCount ?? 0)
   }, [profile, splitPreference, completedSessionCount])
 
   const isRestDay = sessionType === 'rest' || sessionType === 'active_recovery'
@@ -79,38 +99,20 @@ export default function TodayPage() {
   const workout = useMemo(() => {
     if (!exercises || !profile || isRestDay) {
       return {
-        warmup: [] as Exercise[],
-        main: [] as Exercise[],
-        cooldown: [] as Exercise[],
-        config: {
-          warmupCount: 3, cooldownCount: 3, setsPerExercise: 3,
-          baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null,
-        },
+        warmup: [] as Exercise[], main: [] as Exercise[], cooldown: [] as Exercise[],
+        config: { warmupCount: 3, cooldownCount: 3, setsPerExercise: 3, baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null },
       }
     }
-    return buildWorkout(
-      sessionType, timeSlot, effectiveProgressionMap,
-      profile.equipment ?? [], exercises as Exercise[]
-    )
+    return buildWorkout(sessionType, timeSlot, effectiveProgressionMap, profile.equipment ?? [], exercises as Exercise[])
   }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay])
 
-  const allExercises = useMemo(
-    () => [...workout.warmup, ...workout.main, ...workout.cooldown],
-    [workout]
-  )
+  const allExercises = useMemo(() => [...workout.warmup, ...workout.main, ...workout.cooldown], [workout])
 
   useEffect(() => {
-    // Do not react to todaySession changes if we just completed a session
-    // ourselves — PostWorkout is already mounted and handling the save.
     if (sessionJustCompleted) return
-
-    if (todaySession?.status === 'completed' && view !== 'post') {
-      setView('post')
-    } else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') {
-      setView('active')
-    } else if (isRestDay && view === 'preview') {
-      setView('recovery')
-    }
+    if (todaySession?.status === 'completed' && view !== 'post') setView('post')
+    else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') setView('active')
+    else if (isRestDay && view === 'preview') setView('recovery')
   }, [todaySession, isActive, isRestDay, sessionJustCompleted])
 
   const isLoading = loadingEx || loadingProg || loadingProfile || completedSessionCount === undefined
@@ -120,79 +122,68 @@ export default function TodayPage() {
       <div className="flex flex-col gap-4 pt-6">
         <Wordmark />
         <div className="flex flex-col gap-3 mt-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />
-          ))}
+          {[1, 2, 3].map((i) => <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />)}
         </div>
       </div>
     )
   }
 
-  const handleStartSession = async () => {
+  const handleStartSession = async (readiness: Readiness) => {
     if (allExercises.length === 0) return
     const dbTime: 30 | 45 | 60 = timeSlot === 'no_rush' ? 60 : timeSlot
     try {
-      const session = await createSession.mutateAsync({
-        session_type: sessionType,
-        time_available: dbTime,
-      })
+      const session = await createSession.mutateAsync({ session_type: sessionType, time_available: dbTime })
+      try {
+        await supabase.from('workout_sessions').update({ readiness_score: readiness }).eq('id', session.id)
+      } catch { /* column may not exist */ }
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
       setView('active')
-    } catch (err) {
-      console.error('Failed to create session:', err)
-    }
+    } catch (err) { console.error('Failed to create session:', err) }
   }
 
-  const handleStartRecoverySession = async (
-    recoveryExercises: Exercise[],
-    setsPerExercise: number
-  ) => {
+  const handleStartRecoverySession = async (recoveryExercises: Exercise[], setsPerExercise: number) => {
     try {
-      const session = await createSession.mutateAsync({
-        session_type: 'active_recovery',
-        time_available: 30,
-      })
+      const session = await createSession.mutateAsync({ session_type: 'active_recovery', time_available: 30 })
       startSession(session.id, recoveryExercises, 30, setsPerExercise)
       setView('active')
-    } catch (err) {
-      console.error('Failed to create recovery session:', err)
-    }
+    } catch (err) { console.error('Failed to create recovery session:', err) }
   }
 
   const handleFullRest = async () => {
     if (user) {
       await supabase.from('workout_sessions').insert({
-        user_id: user.id,
-        date: new Date().toISOString().split('T')[0],
-        session_type: 'rest',
-        status: 'skipped',
-        time_available: 30,
-        total_sets: 0,
-        total_reps: 0,
-        pain_flagged: false,
-        score_awarded: 0,
-        exercises_completed: [],
+        user_id: user.id, date: new Date().toISOString().split('T')[0],
+        session_type: 'rest', status: 'skipped', time_available: 30,
+        total_sets: 0, total_reps: 0, pain_flagged: false, score_awarded: 0, exercises_completed: [],
       })
     }
     setSessionJustCompleted(true)
     setView('post')
   }
 
-  // Called from ActiveSession when all exercises are done
-  const handleSessionEnd = () => {
-    setSessionJustCompleted(true)
-    setView('post')
+  const handlePainFollowUp = async (response: 'better' | 'same' | 'worse') => {
+    if (!user || !lastSessionData) return
+    try {
+      const rec = lastSessionData as Record<string, unknown>
+      await supabase.from('pain_logs').insert({
+        user_id: user.id, session_id: null,
+        pain_note: typeof rec.pain_note === 'string' ? rec.pain_note : 'unspecified',
+        checkin_response: response, logged_at: new Date().toISOString(),
+      })
+      queryClient.invalidateQueries({ queryKey: ['last_session', user.id] })
+    } catch { /* pain_logs may not exist yet */ }
   }
 
-  // Called from PostWorkout after all saves are complete and endSession() has run
+  const handleSessionEnd = () => { setSessionJustCompleted(true); setView('post') }
+
   const handleDone = () => {
     setSessionJustCompleted(false)
+    queryClient.invalidateQueries({ queryKey: ['last_session', user?.id] })
     setView(isRestDay ? 'recovery' : 'preview')
   }
 
   const hour = new Date().getHours()
-  const greeting =
-    hour < 12 ? 'GOOD MORNING.' : hour < 17 ? 'GOOD AFTERNOON.' : 'GOOD EVENING.'
+  const greeting = hour < 12 ? 'GOOD MORNING.' : hour < 17 ? 'GOOD AFTERNOON.' : 'GOOD EVENING.'
 
   return (
     <div className="flex flex-col pt-6">
@@ -202,10 +193,7 @@ export default function TodayPage() {
           <motion.div key="recovery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <Wordmark />
             <h1 className="text-4xl font-black mt-2 mb-4">{greeting}</h1>
-            <RecoveryDay
-              onStartSession={handleStartRecoverySession}
-              onFullRest={handleFullRest}
-            />
+            <RecoveryDay onStartSession={handleStartRecoverySession} onFullRest={handleFullRest} />
           </motion.div>
         )}
 
@@ -215,21 +203,15 @@ export default function TodayPage() {
             <h1 className="text-4xl font-black mt-2 mb-4">{greeting}</h1>
             {allExercises.length === 0 ? (
               <div className="bg-surface rounded-card p-5">
-                <p className="text-text-secondary">
-                  No exercises found for today's session type. Check Supabase exercise library.
-                </p>
+                <p className="text-text-secondary">No exercises found. Check Supabase exercise library.</p>
               </div>
             ) : (
               <WorkoutPreview
-                sessionType={sessionType}
-                timeSlot={timeSlot}
-                warmup={workout.warmup}
-                main={workout.main}
-                cooldown={workout.cooldown}
-                config={workout.config}
-                onTimeChange={setTimeSlot}
-                onStart={handleStartSession}
-                isStarting={createSession.isPending}
+                sessionType={sessionType} timeSlot={timeSlot}
+                warmup={workout.warmup} main={workout.main} cooldown={workout.cooldown}
+                config={workout.config} onTimeChange={setTimeSlot}
+                onStart={handleStartSession} isStarting={createSession.isPending}
+                isComeback={isComeback} painFollowUp={painFollowUp} onPainFollowUp={handlePainFollowUp}
               />
             )}
           </motion.div>
