@@ -14,13 +14,8 @@ interface Props {
 }
 
 export function SetLogger({
-  setNumber,
-  totalSets,
-  targetRepsMin,
-  targetRepsMax,
-  targetDurationSeconds,
-  onLog,
-  isLogging = false,
+  setNumber, totalSets, targetRepsMin, targetRepsMax,
+  targetDurationSeconds, onLog, isLogging = false,
 }: Props) {
   const [reps, setReps] = useState<number>(targetRepsMin ?? 10)
   const [effort, setEffort] = useState<Effort | null>(null)
@@ -30,12 +25,16 @@ export function SetLogger({
 
   const handleLog = () => {
     if (!effort) return
-    if (isDuration) {
-      onLog(null, targetDurationSeconds, effort)
-    } else {
-      onLog(reps, null, effort)
-    }
+    if (isDuration) onLog(null, targetDurationSeconds, effort)
+    else onLog(reps, null, effort)
   }
+
+  // Quick-add buttons based on target range
+  const quickAdds = targetRepsMin ? [
+    targetRepsMin,
+    Math.round((targetRepsMin + (targetRepsMax ?? targetRepsMin + 4)) / 2),
+    targetRepsMax ?? targetRepsMin + 4,
+  ].filter((v, i, arr) => arr.indexOf(v) === i) : [6, 8, 10, 12]
 
   return (
     <div className="flex flex-col gap-5">
@@ -44,55 +43,67 @@ export function SetLogger({
         SET {setNumber} OF {totalSets}
       </p>
 
-      {/* Reps or Duration display */}
       {isDuration ? (
         <div className="flex flex-col items-center gap-1">
-          <span className="text-6xl font-black text-text-primary">
-            {targetDurationSeconds}
-          </span>
+          <span className="text-6xl font-black text-text-primary">{targetDurationSeconds}</span>
           <span className="text-text-secondary text-sm">SECONDS</span>
         </div>
       ) : (
-        <div className="flex items-center justify-center gap-6">
-          <button
-            onClick={() => setReps((r) => Math.max(0, r - 1))}
-            className="w-14 h-14 rounded-full bg-surface text-text-primary text-2xl font-bold active:bg-surface-raised active:scale-95 transition-all"
-          >
-            −
-          </button>
-          <div className="flex flex-col items-center">
-            <span className="text-6xl font-black text-text-primary w-24 text-center">
-              {reps}
-            </span>
-            <span className="text-text-secondary text-xs">REPS</span>
+        <>
+          {/* Reps adjuster */}
+          <div className="flex items-center justify-center gap-6">
+            <button
+              onClick={() => setReps((r) => Math.max(0, r - 1))}
+              className="w-14 h-14 rounded-full bg-surface text-text-primary text-2xl font-bold active:bg-surface-raised active:scale-95 transition-all"
+            >
+              −
+            </button>
+            <div className="flex flex-col items-center">
+              <span className="text-6xl font-black text-text-primary w-24 text-center">{reps}</span>
+              <span className="text-text-secondary text-xs">REPS</span>
+            </div>
+            <button
+              onClick={() => setReps((r) => r + 1)}
+              className="w-14 h-14 rounded-full bg-surface text-text-primary text-2xl font-bold active:bg-surface-raised active:scale-95 transition-all"
+            >
+              +
+            </button>
           </div>
-          <button
-            onClick={() => setReps((r) => r + 1)}
-            className="w-14 h-14 rounded-full bg-surface text-text-primary text-2xl font-bold active:bg-surface-raised active:scale-95 transition-all"
-          >
-            +
-          </button>
-        </div>
-      )}
 
-      {/* Target hint */}
-      {targetRepsMin !== null && targetRepsMax !== null && (
-        <p className="text-text-disabled text-xs text-center tracking-wide">
-          Target: {targetRepsMin}–{targetRepsMax} reps
-        </p>
+          {/* Quick-tap preset buttons */}
+          <div className="flex gap-2 justify-center">
+            {quickAdds.map((n) => (
+              <button
+                key={n}
+                onClick={() => setReps(n)}
+                className={`h-10 px-4 rounded-pill text-sm font-bold transition-all ${
+                  reps === n
+                    ? 'bg-accent text-navbar'
+                    : 'bg-surface text-text-secondary'
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+
+          {/* Target range hint */}
+          {targetRepsMin !== null && targetRepsMax !== null && (
+            <p className="text-text-disabled text-xs text-center tracking-wide">
+              Target: {targetRepsMin}–{targetRepsMax} reps
+              {reps >= targetRepsMin && reps <= targetRepsMax && (
+                <span className="text-accent ml-2">✓</span>
+              )}
+            </p>
+          )}
+        </>
       )}
 
       {/* Effort picker */}
       <EffortPicker value={effort} onChange={setEffort} />
 
       {/* Log button */}
-      <Button
-        fullWidth
-        disabled={!canLog}
-        loading={isLogging}
-        onClick={handleLog}
-        size="lg"
-      >
+      <Button fullWidth disabled={!canLog} loading={isLogging} onClick={handleLog} size="lg">
         LOG SET
       </Button>
     </div>

@@ -20,16 +20,39 @@ function calcLevel(exp: number): { level: number; title: string } {
   return { level, title: LEVEL_TITLES[level - 1] ?? 'Champion' }
 }
 
+// Guarantee a user_score row exists — call before any read
+export async function ensureUserScoreRow(userId: string): Promise<void> {
+  const { data } = await supabase
+    .from('user_score')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (!data) {
+    await supabase.from('user_score').insert({
+      user_id: userId,
+      total_exp: 0,
+      weekly_exp: 0,
+      current_streak: 0,
+      longest_streak: 0,
+      total_sessions: 0,
+      total_reps: 0,
+      user_level: 1,
+      user_level_title: 'Untrained',
+    })
+  }
+}
+
 export async function awardSessionScore(
   userId: string,
   sessionId: string,
   extras: { progressionUnlocked: boolean; fullBookends: boolean }
 ): Promise<number> {
+  await ensureUserScoreRow(userId)
+
   let points = SCORES.SESSION
   if (extras.progressionUnlocked) points += SCORES.PROGRESSION
   if (extras.fullBookends) points += SCORES.FULL_BOOKENDS
 
-  // Fetch current score row — select * so we see whichever column names exist
   const { data: current } = await supabase
     .from('user_score')
     .select('*')
@@ -38,7 +61,6 @@ export async function awardSessionScore(
 
   const row = (current ?? {}) as Record<string, unknown>
 
-  // Handle both old column names (total_score) and new (total_exp)
   const currentExp = (row.total_exp ?? row.total_score ?? 0) as number
   const currentWeeklyExp = (row.weekly_exp ?? row.weekly_score ?? 0) as number
   const currentSessions = (row.total_sessions ?? 0) as number
@@ -46,7 +68,6 @@ export async function awardSessionScore(
   const currentLongest = (row.longest_streak ?? 0) as number
   const currentReps = (row.total_reps ?? 0) as number
 
-  // Count reps from this session's logs
   const { data: sessionLogs } = await supabase
     .from('exercise_logs')
     .select('reps')
@@ -55,7 +76,6 @@ export async function awardSessionScore(
     (sum, l) => sum + (((l as Record<string, unknown>).reps as number) ?? 0), 0
   )
 
-  // Streak: only increment if last completed session was today or yesterday
   const today = new Date().toISOString().split('T')[0]
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
 
@@ -72,26 +92,20 @@ export async function awardSessionScore(
   const lastDate = lastSession?.date as string | undefined
   const streakContinues = !lastDate || lastDate === today || lastDate === yesterday
   const newStreak = streakContinues ? currentStreak + 1 : 1
-
-  // Weekly streak bonus at every 7-day milestone
   const weeklyBonus = newStreak % 7 === 0 ? SCORES.WEEKLY_STREAK : 0
   const totalPoints = points + weeklyBonus
 
   const newExp = Math.max(0, currentExp + totalPoints)
   const { level, title } = calcLevel(newExp)
 
-  // Weekly exp — reset on Monday
   const now = new Date()
   const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1
   const weekStart = new Date(now)
   weekStart.setDate(now.getDate() - daysFromMonday)
   const weekStartStr = weekStart.toISOString().split('T')[0]
   const storedWeekStart = row.week_start as string | undefined
-  const newWeeklyExp = storedWeekStart === weekStartStr
-    ? currentWeeklyExp + totalPoints
-    : totalPoints
+  const newWeeklyExp = storedWeekStart === weekStartStr ? currentWeeklyExp + totalPoints : totalPoints
 
-  // Build upsert — handle both old and new column names
   const hasNewColumns = 'total_exp' in row
   const scoreUpsert: Record<string, unknown> = {
     user_id: userId,
@@ -115,27 +129,18 @@ export async function awardSessionScore(
   const { error: upsertErr } = await supabase.from('user_score').upsert(scoreUpsert)
   if (upsertErr) console.error('Score upsert error:', upsertErr)
 
-  // Update session record
-  await supabase
-    .from('workout_sessions')
-    .update({
-      score_awarded: totalPoints,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', sessionId)
+  await supabase.from('workout_sessions').update({
+    score_awarded: totalPoints,
+    completed_at: new Date().toISOString(),
+  }).eq('id', sessionId)
 
-  // Write exp transaction — non-fatal if table doesn't exist yet
   try {
     await supabase.from('exp_transactions').insert({
-      user_id: userId,
-      session_id: sessionId,
-      amount: totalPoints,
+      user_id: userId, session_id: sessionId, amount: totalPoints,
       reason: `Session${extras.fullBookends ? ' + bookends' : ''}${extras.progressionUnlocked ? ' + progression' : ''}`,
       is_achievement_unlock: false,
     })
-  } catch {
-    // table not yet created — silently skip
-  }
+  } catch { /* non-fatal */ }
 
   return totalPoints
 }
