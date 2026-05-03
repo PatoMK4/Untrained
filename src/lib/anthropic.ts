@@ -1,7 +1,3 @@
-import type { ParsedLog } from '@/types/app.types'
-import { CHAT_SCRIPTS } from '@/constants/chatScripts'
-import { hasPainSignal } from '@/lib/painDetector'
-
 interface PTContext {
   exerciseName: string
   sessionType: string
@@ -42,20 +38,4 @@ Active pain flags: ${ctx.activePainFlags.join(', ') || 'none'}`
   if (!res.ok) throw new Error('API failed')
   const data = await res.json() as { content: { text: string }[] }
   return data.content[0].text
-}
-
-export function getLiteResponse(parsed: ParsedLog, msg: string): string {
-  if (parsed.type === 'reps' && parsed.reps !== undefined) return CHAT_SCRIPTS.reps_logged(parsed.reps)
-  if (parsed.type === 'effort' && parsed.effort) {
-    const key = `effort_${parsed.effort}` as keyof typeof CHAT_SCRIPTS
-    const script = CHAT_SCRIPTS[key]
-    return typeof script === 'string' ? script : CHAT_SCRIPTS.unknown
-  }
-  if (parsed.type === 'weight' && parsed.weightKg !== undefined) return CHAT_SCRIPTS.weight_added(parsed.weightKg)
-  if (parsed.type === 'done') return CHAT_SCRIPTS.session_end
-  if (parsed.type === 'rest') return CHAT_SCRIPTS.rest_granted
-  if (parsed.type === 'skip') return CHAT_SCRIPTS.skip_acknowledged
-  if (hasPainSignal(msg)) return CHAT_SCRIPTS.pain_detected
-  if (/can'?t|too hard|i give up|impossible/.test(msg.toLowerCase())) return CHAT_SCRIPTS.motivation
-  return CHAT_SCRIPTS.unknown
 }
