@@ -4,9 +4,9 @@ import { SetLogger } from '@/components/workout/SetLogger'
 import { RestTimer } from '@/components/workout/RestTimer'
 import { Button } from '@/components/ui/Button'
 import { useSessionStore } from '@/stores/sessionStore'
-import { useLogSet, useRecentLogs } from '@/hooks/useWorkout'
+import { useLogSet, useRecentLogs, useExercises } from '@/hooks/useWorkout'
 import { calculateRestSeconds } from '@/lib/workoutEngine'
-import type { Effort, MovementPattern } from '@/types/app.types'
+import type { Effort, MovementPattern, Exercise } from '@/types/app.types'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 
 interface Props {
@@ -36,11 +36,19 @@ export function ActiveSession({ onSessionEnd }: Props) {
   } = useSessionStore()
 
   const [showCue, setShowCue] = useState(false)
+  const [showSwap, setShowSwap] = useState(false)
+  const [swappedExercises, setSwappedExercises] = useState<Record<number, Exercise>>({})
+
   const logSetMutation = useLogSet()
-  const currentExercise = exercises[currentExerciseIndex]
+  const { data: allExercises } = useExercises()
+  const elapsedTime = useElapsedTime(startedAt)
+
+  // Use swapped exercise if one exists for this index
+  const rawExercise = exercises[currentExerciseIndex]
+  const currentExercise = swappedExercises[currentExerciseIndex] ?? rawExercise
+
   const isLastExercise = currentExerciseIndex === exercises.length - 1
   const isLastSet = currentSetNumber > totalSets
-  const elapsedTime = useElapsedTime(startedAt)
 
   const { data: recentLogs } = useRecentLogs(currentExercise?.id ?? null)
   const lastSessionReps = recentLogs && recentLogs.length > 0 ? recentLogs[0].reps : null
@@ -55,8 +63,22 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const consecutiveHard = currentExercise ? (consecutiveHardByExercise[currentExercise.id] ?? 0) : 0
   const showRegressionWarning = consecutiveHard >= 3
 
-  // Sets logged for current exercise in this session
   const currentExerciseLogs = logs.filter((l) => l.exerciseId === currentExercise?.id)
+
+  // Find swap candidates: same muscle group, same equipment, different exercise, not already in session
+  const swapCandidates = useMemo(() => {
+    if (!allExercises || !rawExercise) return []
+    const sessionIds = new Set(exercises.map(e => e.id))
+    return allExercises
+      .filter(e =>
+        e.muscle_group === rawExercise.muscle_group &&
+        e.equipment_required === rawExercise.equipment_required &&
+        !sessionIds.has(e.id) &&
+        e.progression_level === rawExercise.progression_level &&
+        !e.is_warmup && !e.is_cooldown
+      )
+      .slice(0, 4)
+  }, [allExercises, rawExercise, exercises])
 
   const getSectionLabel = () => {
     if (!currentExercise) return ''
@@ -81,15 +103,20 @@ export function ActiveSession({ onSessionEnd }: Props) {
   }
 
   const handleRestDone = () => {
-    // Haptic feedback when rest timer completes
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
     setShowRestTimer(false)
   }
 
   const handleNextExercise = () => {
     setShowCue(false)
+    setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
+  }
+
+  const handleSwap = (replacement: Exercise) => {
+    setSwappedExercises(prev => ({ ...prev, [currentExerciseIndex]: replacement }))
+    setShowSwap(false)
   }
 
   if (!currentExercise) {
@@ -103,7 +130,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
 
   return (
     <div className="flex flex-col pt-6 pb-32 min-h-[calc(100vh-6rem)]">
-      {/* Top bar: progress + elapsed */}
+      {/* Progress bar + elapsed */}
       <div className="flex items-center gap-3 mb-5">
         <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
           <div
@@ -120,33 +147,45 @@ export function ActiveSession({ onSessionEnd }: Props) {
         <span className="text-text-disabled text-xs">{currentExerciseIndex + 1} / {exercises.length}</span>
       </div>
 
-      {/* Exercise name + cue toggle */}
+      {/* Exercise name + controls */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={currentExercise.id}
+          key={`${currentExerciseIndex}-${currentExercise.id}`}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
           transition={{ duration: 0.2 }}
           className="mb-6"
         >
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2 mb-1">
             <h1 className="text-4xl font-black text-text-primary leading-tight uppercase flex-1">
               {currentExercise.name}
             </h1>
-            <button
-              onClick={() => setShowCue((v) => !v)}
-              className="flex-shrink-0 mt-1 h-8 px-3 bg-surface rounded-pill text-text-disabled text-xs font-bold tracking-widest"
-            >
-              {showCue ? 'HIDE' : 'CUE'}
-            </button>
+            <div className="flex gap-1 flex-shrink-0 mt-1">
+              <button
+                onClick={() => { setShowCue(v => !v); setShowSwap(false) }}
+                className="h-8 px-3 bg-surface rounded-pill text-text-disabled text-xs font-bold tracking-widest"
+              >
+                {showCue ? 'HIDE' : 'CUE'}
+              </button>
+              {!currentExercise.is_warmup && !currentExercise.is_cooldown && (
+                <button
+                  onClick={() => { setShowSwap(v => !v); setShowCue(false) }}
+                  className="h-8 px-3 bg-surface rounded-pill text-text-disabled text-xs font-bold tracking-widest"
+                >
+                  SWAP
+                </button>
+              )}
+            </div>
           </div>
-          {lastSessionReps !== null && !showCue && (
-            <p className="text-text-disabled text-sm mt-1">Last session: {lastSessionReps} reps</p>
+
+          {lastSessionReps !== null && !showCue && !showSwap && (
+            <p className="text-text-disabled text-sm">Last session: {lastSessionReps} reps</p>
           )}
-          {/* Technique cue — toggled by user, never auto-shown */}
+
+          {/* Cue card */}
           <AnimatePresence>
-            {showCue && currentExercise.cue_card && currentExercise.cue_card.length > 0 && (
+            {showCue && currentExercise.cue_card?.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -159,11 +198,44 @@ export function ActiveSession({ onSessionEnd }: Props) {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Swap panel */}
+          <AnimatePresence>
+            {showSwap && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mt-3 flex flex-col gap-2"
+              >
+                <p className="text-text-disabled text-xs font-bold tracking-widest">SWAP WITH</p>
+                {swapCandidates.length === 0 ? (
+                  <p className="text-text-secondary text-sm">No alternatives available at this level.</p>
+                ) : (
+                  swapCandidates.map(ex => (
+                    <button
+                      key={ex.id}
+                      onClick={() => handleSwap(ex)}
+                      className="h-12 bg-surface rounded-card px-4 text-left text-text-primary text-sm font-bold active:brightness-110 transition-all"
+                    >
+                      {ex.name}
+                    </button>
+                  ))
+                )}
+                <button
+                  onClick={() => setShowSwap(false)}
+                  className="text-text-disabled text-xs text-center py-1"
+                >
+                  Cancel
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </AnimatePresence>
 
-      {/* Set history for current exercise */}
-      {currentExerciseLogs.length > 0 && (
+      {/* Set history pills */}
+      {currentExerciseLogs.length > 0 && !showSwap && (
         <div className="flex gap-2 mb-4 flex-wrap">
           {currentExerciseLogs.map((l, i) => (
             <div key={i} className={`h-8 px-3 rounded-pill flex items-center gap-1 text-xs font-bold ${
@@ -179,14 +251,14 @@ export function ActiveSession({ onSessionEnd }: Props) {
       )}
 
       {/* Regression warning */}
-      {showRegressionWarning && !showRestTimer && (
+      {showRegressionWarning && !showRestTimer && !showSwap && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
           className="mb-4 bg-surface rounded-card p-3 border-l-4 border-warning"
         >
           <p className="text-warning text-xs font-bold">
-            {consecutiveHard} hard sets in a row. Consider an easier variation next session.
+            {consecutiveHard} hard sets. Tap SWAP if you need an easier alternative.
           </p>
         </motion.div>
       )}
@@ -217,7 +289,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
                 </p>
               )}
             </motion.div>
-          ) : (
+          ) : !showSwap ? (
             <motion.div
               key={`set-${currentExerciseIndex}-${currentSetNumber}`}
               initial={{ opacity: 0, y: 10 }}
@@ -235,13 +307,13 @@ export function ActiveSession({ onSessionEnd }: Props) {
                 isLogging={logSetMutation.isPending}
               />
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
       </div>
 
       <ChatPanel sessionId={sessionId} />
 
-      {!showRestTimer && (
+      {!showRestTimer && !showSwap && (
         <button onClick={onSessionEnd} className="text-text-disabled text-xs text-center py-3 mt-4">
           End session early
         </button>
