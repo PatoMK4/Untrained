@@ -5,6 +5,7 @@ import { estimateCalories } from '@/lib/workoutEngine'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useCompleteSession } from '@/hooks/useWorkout'
 import { awardSessionScore } from '@/lib/scoreEngine'
+import { runProgressionCheck } from '@/lib/progressionEngine'
 import { useAuthStore } from '@/stores/authStore'
 
 interface Props {
@@ -21,6 +22,7 @@ export function PostWorkout({ onDone }: Props) {
   const [isDone, setIsDone] = useState(false)
   const [scoreAwarded, setScoreAwarded] = useState(0)
   const [saving, setSaving] = useState(false)
+  const [progressionUnlocked, setProgressionUnlocked] = useState(false)
 
   const showPainCheck = painFlags.length > 0
 
@@ -29,7 +31,6 @@ export function PostWorkout({ onDone }: Props) {
   const avgReps = totalSets > 0 ? totalReps / totalSets : 0
   const estimatedCals = estimateCalories(totalSets, avgReps)
 
-  // Check if warmup and cooldown were completed
   const hasWarmup = exercises.some((e) => e.is_warmup)
   const hasCooldown = exercises.some((e) => e.is_cooldown)
   const warmupLogged = hasWarmup && logs.some((l) =>
@@ -40,7 +41,6 @@ export function PostWorkout({ onDone }: Props) {
   )
   const fullBookends = warmupLogged && cooldownLogged
 
-  // Save session to Supabase immediately when PostWorkout mounts
   useEffect(() => {
     const saveSession = async () => {
       const sessionId = useSessionStore.getState().sessionId
@@ -56,8 +56,12 @@ export function PostWorkout({ onDone }: Props) {
           painNote: undefined,
           painFlagged: false,
         })
+        // Run progression check BEFORE awarding score so bonus is included
+        const progressed = await runProgressionCheck(user.id, sessionId)
+        setProgressionUnlocked(progressed)
+
         const points = await awardSessionScore(user.id, sessionId, {
-          progressionUnlocked: false,
+          progressionUnlocked: progressed,
           fullBookends,
         })
         setScoreAwarded(points)
@@ -73,7 +77,6 @@ export function PostWorkout({ onDone }: Props) {
 
   const handleDone = async () => {
     setIsDone(true)
-    // If pain was flagged, update the session with pain note
     const sessionId = useSessionStore.getState().sessionId
     if (sessionId && user && painFlags.length > 0 && painResponse !== null) {
       try {
@@ -131,6 +134,9 @@ export function PostWorkout({ onDone }: Props) {
         </div>
         {fullBookends && (
           <p className="text-accent text-xs font-bold">+5 BONUS — WARM-UP & COOL-DOWN COMPLETED</p>
+        )}
+        {progressionUnlocked && (
+          <p className="text-accent text-xs font-bold">+25 BONUS — LEVEL UP</p>
         )}
       </div>
 
