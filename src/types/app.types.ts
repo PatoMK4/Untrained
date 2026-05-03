@@ -3,6 +3,7 @@ export type Goal = 'strength' | 'muscle' | 'endurance' | 'weight_loss' | 'overal
 export type Environment = 'home' | 'gym' | 'both' | 'outdoors'
 export type Equipment = 'none' | 'pullup_bar' | 'rings' | 'gym'
 export type Effort = 'easy' | 'medium' | 'hard'
+export type Readiness = 'great' | 'good' | 'tired'
 export type SessionType = 'push' | 'pull' | 'legs' | 'full_body' | 'active_recovery' | 'rest'
 export type SessionStatus = 'generated' | 'in_progress' | 'completed' | 'skipped'
 export type MuscleGroup = 'push' | 'pull' | 'squat' | 'core' | 'hinge' | 'mobility' | 'full_body'
@@ -12,13 +13,8 @@ export type BodyFocus = 'lose' | 'maintain' | 'build'
 export type WeightUnit = 'kg' | 'lbs'
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack'
 
-// Split preference — user selects during onboarding
 export type SplitPreference = 'full_body' | 'ppl' | 'upper_lower' | 'bro_split'
-
-// Per-movement fitness level — 1=beginner, 2=novice, 3=intermediate, 4=advanced
 export type MovementLevel = 1 | 2 | 3 | 4
-
-// Time slot for session selection
 export type TimeSlot = 30 | 45 | 60 | 'no_rush'
 
 // ── User ────────────────────────────────────────────────────────────────────

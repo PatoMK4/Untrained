@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Wordmark } from '@/components/ui/Wordmark'
-import { useScore, useSessionHistory } from '@/hooks/useScore'
+import { useScore, useSessionHistory, useLastWeekSummary } from '@/hooks/useScore'
 import { useProgression, useUserProfile } from '@/hooks/useWorkout'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
@@ -25,9 +25,11 @@ export default function ProgressPage() {
   const { data: history, isLoading: historyLoading } = useSessionHistory()
   const { data: progression } = useProgression()
   const { data: profile } = useUserProfile()
+  const { data: lastWeekSummary } = useLastWeekSummary()
   const [activePattern, setActivePattern] = useState<MovementPattern>('push')
 
   const hasSessions = (score?.total_sessions ?? 0) > 0
+  const isMonday = new Date().getDay() === 1
 
   const { data: weekActivity } = useQuery({
     queryKey: ['week_activity', user?.id],
@@ -43,28 +45,6 @@ export default function ProgressPage() {
     enabled: !!user,
   })
 
-  const { data: lastWeekSummary } = useQuery({
-    queryKey: ['last_week_summary', user?.id],
-    queryFn: async () => {
-      const now = new Date()
-      const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1
-      const thisMonday = new Date(now)
-      thisMonday.setDate(now.getDate() - daysFromMonday)
-      const lastMonday = new Date(thisMonday)
-      lastMonday.setDate(thisMonday.getDate() - 7)
-      const { data } = await supabase
-        .from('workout_sessions')
-        .select('date, total_sets, total_reps, score_awarded, session_type')
-        .eq('user_id', user!.id)
-        .eq('status', 'completed')
-        .gte('date', lastMonday.toISOString().split('T')[0])
-        .lt('date', thisMonday.toISOString().split('T')[0])
-      return data ?? []
-    },
-    enabled: !!user,
-  })
-
-  const isMonday = new Date().getDay() === 1
   const isLoading = scoreLoading || historyLoading
 
   if (isLoading) {
@@ -77,13 +57,13 @@ export default function ProgressPage() {
   }
 
   const scoreRow = (score ?? {}) as Record<string, unknown>
-  const totalScore = (scoreRow.total_exp ?? scoreRow.total_score ?? 0) as number
-  const weeklyScore = (scoreRow.weekly_exp ?? scoreRow.weekly_score ?? 0) as number
-  const streak = (scoreRow.current_streak ?? 0) as number
-  const longestStreak = (scoreRow.longest_streak ?? 0) as number
-  const totalSessions = (scoreRow.total_sessions ?? 0) as number
-  const totalReps = (scoreRow.total_reps ?? 0) as number
-  const userLevel = (scoreRow.user_level ?? 1) as number
+  const totalScore    = (scoreRow.total_exp   ?? scoreRow.total_score   ?? 0) as number
+  const weeklyScore   = (scoreRow.weekly_exp  ?? scoreRow.weekly_score  ?? 0) as number
+  const streak        = (scoreRow.current_streak  ?? 0) as number
+  const longestStreak = (scoreRow.longest_streak  ?? 0) as number
+  const totalSessions = (scoreRow.total_sessions  ?? 0) as number
+  const totalReps     = (scoreRow.total_reps       ?? 0) as number
+  const userLevel     = (scoreRow.user_level       ?? 1) as number
   const userLevelTitle = (scoreRow.user_level_title ?? 'Untrained') as string
 
   if (!hasSessions) {
@@ -123,9 +103,11 @@ export default function ProgressPage() {
     <div className="flex flex-col gap-6 pt-6">
       <Wordmark />
 
-      {/* Weekly summary — Mondays only */}
+      {/* Monday weekly summary */}
       {isMonday && lastWeekSummary && lastWeekSummary.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
           className="bg-surface rounded-card p-5 border-l-4 border-accent"
         >
           <p className="text-accent text-xs font-bold tracking-widest mb-2">LAST WEEK</p>
@@ -137,13 +119,13 @@ export default function ProgressPage() {
             <div>
               <p className="text-text-disabled text-xs">TOTAL REPS</p>
               <p className="text-text-primary font-black text-2xl">
-                {lastWeekSummary.reduce((s, r) => s + (r.total_reps ?? 0), 0)}
+                {lastWeekSummary.reduce((s, r) => s + ((r as Record<string,number>).total_reps ?? 0), 0)}
               </p>
             </div>
             <div>
               <p className="text-text-disabled text-xs">SCORE</p>
               <p className="text-accent font-black text-2xl">
-                +{lastWeekSummary.reduce((s, r) => s + (r.score_awarded ?? 0), 0)}
+                +{lastWeekSummary.reduce((s, r) => s + ((r as Record<string,number>).score_awarded ?? 0), 0)}
               </p>
             </div>
           </div>
@@ -157,8 +139,10 @@ export default function ProgressPage() {
         </motion.div>
       )}
 
-      {/* Score + level */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      {/* Score + level card */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
         className="bg-surface rounded-card p-5"
       >
         <div className="flex items-end justify-between mb-1">
@@ -204,20 +188,29 @@ export default function ProgressPage() {
       {weekActivity && weekActivity.length > 0 && (
         <div className="flex flex-col gap-3">
           <p className="text-text-disabled text-xs tracking-widest">THIS WEEK</p>
-          {weekActivity.map((s, i) => (
-            <div key={i} className="bg-surface rounded-card p-4 flex items-center justify-between">
-              <div>
-                <p className="text-text-primary font-bold text-sm">{SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}</p>
-                <p className="text-text-disabled text-xs">
-                  {new Date(s.date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </p>
+          {weekActivity.map((s, i) => {
+            const row = s as Record<string, unknown>
+            return (
+              <div key={i} className="bg-surface rounded-card p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-text-primary font-bold text-sm">
+                    {SESSION_TYPE_LABELS[row.session_type as string] ?? row.session_type}
+                  </p>
+                  <p className="text-text-disabled text-xs">
+                    {new Date(row.date as string).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </p>
+                </div>
+                <div className="text-right">
+                  {(row.total_sets as number) > 0 && (
+                    <p className="text-text-secondary text-sm">{row.total_sets as number} sets · {row.total_reps as number} reps</p>
+                  )}
+                  {(row.score_awarded as number) > 0 && (
+                    <p className="text-accent text-xs font-bold">+{row.score_awarded as number} pts</p>
+                  )}
+                </div>
               </div>
-              <div className="text-right">
-                {s.total_sets > 0 && <p className="text-text-secondary text-sm">{s.total_sets} sets · {s.total_reps} reps</p>}
-                {s.score_awarded > 0 && <p className="text-accent text-xs font-bold">+{s.score_awarded} pts</p>}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -226,7 +219,9 @@ export default function ProgressPage() {
         <p className="text-text-disabled text-xs tracking-widest">YOUR ROADMAP</p>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {patterns.map(p => (
-            <button key={p} onClick={() => setActivePattern(p)}
+            <button
+              key={p}
+              onClick={() => setActivePattern(p)}
               className={`flex-shrink-0 h-9 px-4 rounded-pill text-xs font-bold tracking-widest transition-all ${
                 activePattern === p ? 'bg-accent text-navbar' : 'bg-surface text-text-secondary'
               }`}
@@ -261,20 +256,27 @@ export default function ProgressPage() {
       {history && history.length > 0 && (
         <div className="flex flex-col gap-3 pb-6">
           <p className="text-text-disabled text-xs tracking-widest">RECENT SESSIONS</p>
-          {history.slice(0, 10).map((s, i) => (
-            <div key={i} className="bg-surface rounded-card p-4 flex items-center justify-between">
-              <div>
-                <p className="text-text-primary font-bold text-sm">{SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}</p>
-                <p className="text-text-disabled text-xs">
-                  {new Date(s.date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </p>
+          {history.slice(0, 10).map((s, i) => {
+            const row = s as Record<string, unknown>
+            return (
+              <div key={i} className="bg-surface rounded-card p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-text-primary font-bold text-sm">
+                    {SESSION_TYPE_LABELS[row.session_type as string] ?? row.session_type}
+                  </p>
+                  <p className="text-text-disabled text-xs">
+                    {new Date(row.date as string).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-text-secondary text-sm">{row.total_sets as number} sets</p>
+                  {(row.score_awarded as number) > 0 && (
+                    <p className="text-accent text-xs font-bold">+{row.score_awarded as number}</p>
+                  )}
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-text-secondary text-sm">{s.total_sets} sets</p>
-                {s.score_awarded > 0 && <p className="text-accent text-xs font-bold">+{s.score_awarded}</p>}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

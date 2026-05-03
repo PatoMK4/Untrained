@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Wordmark } from '@/components/ui/Wordmark'
 import { WorkoutPreview } from './WorkoutPreview'
-import type { Readiness } from './WorkoutPreview'
 import { ActiveSession } from './ActiveSession'
 import { PostWorkout } from './PostWorkout'
 import { RecoveryDay } from './RecoveryDay'
@@ -10,10 +9,11 @@ import {
   useExercises, useProgression, useUserProfile,
   useTodaySession, useCreateSession,
 } from '@/hooks/useWorkout'
+import { useLastSession } from '@/hooks/useScore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { buildWorkout, getSessionType } from '@/lib/workoutEngine'
 import type { TimeSlot, SplitPreference } from '@/lib/workoutEngine'
-import type { MovementPattern, SessionType, Exercise } from '@/types/app.types'
+import type { MovementPattern, SessionType, Exercise, Readiness } from '@/types/app.types'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -31,6 +31,7 @@ export default function TodayPage() {
   const { data: progressionMap, isLoading: loadingProg } = useProgression()
   const { data: profile, isLoading: loadingProfile } = useUserProfile()
   const { data: todaySession } = useTodaySession()
+  const { data: lastSessionData } = useLastSession()
   const createSession = useCreateSession()
   const { startSession, isActive } = useSessionStore()
 
@@ -47,33 +48,22 @@ export default function TodayPage() {
     enabled: !!user,
   })
 
-  const { data: lastSessionData } = useQuery({
-    queryKey: ['last_session', user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('workout_sessions')
-        .select('date, pain_flagged, pain_note')
-        .eq('user_id', user!.id)
-        .eq('status', 'completed')
-        .order('date', { ascending: false })
-        .limit(1)
-        .single()
-      return data
-    },
-    enabled: !!user,
-  })
-
+  // Comeback: 4+ days since last session
   const isComeback = useMemo(() => {
     if (!lastSessionData?.date) return false
-    const daysDiff = (Date.now() - new Date(lastSessionData.date as string).getTime()) / (1000 * 60 * 60 * 24)
+    const daysDiff = (Date.now() - new Date(lastSessionData.date as string).getTime()) / 86400000
     return daysDiff >= 4
   }, [lastSessionData])
 
+  // Pain follow-up: last session had pain flagged
   const painFollowUp = useMemo(() => {
     if (!lastSessionData) return null
     const rec = lastSessionData as Record<string, unknown>
     if (!rec.pain_flagged) return null
-    return { note: typeof rec.pain_note === 'string' && rec.pain_note ? rec.pain_note : 'the discomfort you mentioned' }
+    const note = typeof rec.pain_note === 'string' && rec.pain_note
+      ? rec.pain_note
+      : 'the discomfort you mentioned'
+    return { note }
   }, [lastSessionData])
 
   const splitPreference: SplitPreference = (profile?.split_preference as SplitPreference) ?? 'full_body'
@@ -91,7 +81,10 @@ export default function TodayPage() {
 
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
-    return getSessionType(profile.training_days, splitPreference, profile.created_at, completedSessionCount ?? 0)
+    return getSessionType(
+      profile.training_days, splitPreference,
+      profile.created_at, completedSessionCount ?? 0
+    )
   }, [profile, splitPreference, completedSessionCount])
 
   const isRestDay = sessionType === 'rest' || sessionType === 'active_recovery'
@@ -103,10 +96,16 @@ export default function TodayPage() {
         config: { warmupCount: 3, cooldownCount: 3, setsPerExercise: 3, baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null },
       }
     }
-    return buildWorkout(sessionType, timeSlot, effectiveProgressionMap, profile.equipment ?? [], exercises as Exercise[])
+    return buildWorkout(
+      sessionType, timeSlot, effectiveProgressionMap,
+      profile.equipment ?? [], exercises as Exercise[]
+    )
   }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay])
 
-  const allExercises = useMemo(() => [...workout.warmup, ...workout.main, ...workout.cooldown], [workout])
+  const allExercises = useMemo(
+    () => [...workout.warmup, ...workout.main, ...workout.cooldown],
+    [workout]
+  )
 
   useEffect(() => {
     if (sessionJustCompleted) return
@@ -135,7 +134,7 @@ export default function TodayPage() {
       const session = await createSession.mutateAsync({ session_type: sessionType, time_available: dbTime })
       try {
         await supabase.from('workout_sessions').update({ readiness_score: readiness }).eq('id', session.id)
-      } catch { /* column may not exist */ }
+      } catch { /* column may not exist yet */ }
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create session:', err) }
@@ -166,12 +165,14 @@ export default function TodayPage() {
     try {
       const rec = lastSessionData as Record<string, unknown>
       await supabase.from('pain_logs').insert({
-        user_id: user.id, session_id: null,
+        user_id: user.id,
+        session_id: null,
         pain_note: typeof rec.pain_note === 'string' ? rec.pain_note : 'unspecified',
-        checkin_response: response, logged_at: new Date().toISOString(),
+        checkin_response: response,
+        logged_at: new Date().toISOString(),
       })
       queryClient.invalidateQueries({ queryKey: ['last_session', user.id] })
-    } catch { /* pain_logs may not exist yet */ }
+    } catch { /* pain_logs table may not exist yet */ }
   }
 
   const handleSessionEnd = () => { setSessionJustCompleted(true); setView('post') }
@@ -179,6 +180,8 @@ export default function TodayPage() {
   const handleDone = () => {
     setSessionJustCompleted(false)
     queryClient.invalidateQueries({ queryKey: ['last_session', user?.id] })
+    queryClient.invalidateQueries({ queryKey: ['user_score', user?.id] })
+    queryClient.invalidateQueries({ queryKey: ['session_history', user?.id] })
     setView(isRestDay ? 'recovery' : 'preview')
   }
 
@@ -211,7 +214,8 @@ export default function TodayPage() {
                 warmup={workout.warmup} main={workout.main} cooldown={workout.cooldown}
                 config={workout.config} onTimeChange={setTimeSlot}
                 onStart={handleStartSession} isStarting={createSession.isPending}
-                isComeback={isComeback} painFollowUp={painFollowUp} onPainFollowUp={handlePainFollowUp}
+                isComeback={isComeback} painFollowUp={painFollowUp}
+                onPainFollowUp={handlePainFollowUp}
               />
             )}
           </motion.div>

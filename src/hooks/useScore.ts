@@ -55,3 +55,46 @@ export function useUserSettings() {
     enabled: !!user,
   })
 }
+
+export function useLastSession() {
+  const { user } = useAuthStore()
+  return useQuery({
+    queryKey: ['last_session', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('workout_sessions')
+        .select('date, pain_flagged, pain_note')
+        .eq('user_id', user!.id)
+        .eq('status', 'completed')
+        .order('date', { ascending: false })
+        .limit(1)
+        .single()
+      return data
+    },
+    enabled: !!user,
+  })
+}
+
+export function useLastWeekSummary() {
+  const { user } = useAuthStore()
+  return useQuery({
+    queryKey: ['last_week_summary', user?.id],
+    queryFn: async () => {
+      const now = new Date()
+      const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1
+      const thisMonday = new Date(now)
+      thisMonday.setDate(now.getDate() - daysFromMonday)
+      const lastMonday = new Date(thisMonday)
+      lastMonday.setDate(thisMonday.getDate() - 7)
+      const { data } = await supabase
+        .from('workout_sessions')
+        .select('date, total_sets, total_reps, score_awarded, session_type')
+        .eq('user_id', user!.id)
+        .eq('status', 'completed')
+        .gte('date', lastMonday.toISOString().split('T')[0])
+        .lt('date', thisMonday.toISOString().split('T')[0])
+      return data ?? []
+    },
+    enabled: !!user,
+  })
+}
