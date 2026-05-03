@@ -135,6 +135,8 @@ export default function TodayPage() {
       try {
         await supabase.from('workout_sessions').update({ readiness_score: readiness }).eq('id', session.id)
       } catch { /* column may not exist yet */ }
+      // Store readiness so PT chat can reference it during the session
+      sessionStorage.setItem('session_readiness', readiness)
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create session:', err) }
