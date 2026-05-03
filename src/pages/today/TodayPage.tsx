@@ -18,7 +18,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-type View = 'preview' | 'active' | 'post' | 'recovery'
+type View = 'preview' | 'active' | 'post' | 'recovery' | 'done'
 
 export default function TodayPage() {
   const { user } = useAuthStore()
@@ -26,6 +26,7 @@ export default function TodayPage() {
   const [view, setView] = useState<View>('preview')
   const [timeSlot, setTimeSlot] = useState<TimeSlot>(45)
   const [sessionJustCompleted, setSessionJustCompleted] = useState(false)
+  const [readiness, setReadiness] = useState<Readiness | null>(null)
 
   const { data: exercises, isLoading: loadingEx } = useExercises()
   const { data: progressionMap, isLoading: loadingProg } = useProgression()
@@ -48,21 +49,17 @@ export default function TodayPage() {
     enabled: !!user,
   })
 
-  // Comeback: 4+ days since last session
   const isComeback = useMemo(() => {
     if (!lastSessionData?.date) return false
     const daysDiff = (Date.now() - new Date(lastSessionData.date as string).getTime()) / 86400000
     return daysDiff >= 4
   }, [lastSessionData])
 
-  // Pain follow-up: last session had pain flagged
   const painFollowUp = useMemo(() => {
     if (!lastSessionData) return null
     const rec = lastSessionData as Record<string, unknown>
     if (!rec.pain_flagged) return null
-    const note = typeof rec.pain_note === 'string' && rec.pain_note
-      ? rec.pain_note
-      : 'the discomfort you mentioned'
+    const note = typeof rec.pain_note === 'string' && rec.pain_note ? rec.pain_note : 'the discomfort you mentioned'
     return { note }
   }, [lastSessionData])
 
@@ -81,14 +78,12 @@ export default function TodayPage() {
 
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
-    return getSessionType(
-      profile.training_days, splitPreference,
-      profile.created_at, completedSessionCount ?? 0
-    )
+    return getSessionType(profile.training_days, splitPreference, profile.created_at, completedSessionCount ?? 0)
   }, [profile, splitPreference, completedSessionCount])
 
   const isRestDay = sessionType === 'rest' || sessionType === 'active_recovery'
 
+  // Workout rebuilds when readiness changes — readiness affects config
   const workout = useMemo(() => {
     if (!exercises || !profile || isRestDay) {
       return {
@@ -96,16 +91,10 @@ export default function TodayPage() {
         config: { warmupCount: 3, cooldownCount: 3, setsPerExercise: 3, baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null },
       }
     }
-    return buildWorkout(
-      sessionType, timeSlot, effectiveProgressionMap,
-      profile.equipment ?? [], exercises as Exercise[]
-    )
-  }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay])
+    return buildWorkout(sessionType, timeSlot, effectiveProgressionMap, profile.equipment ?? [], exercises as Exercise[], readiness)
+  }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay, readiness])
 
-  const allExercises = useMemo(
-    () => [...workout.warmup, ...workout.main, ...workout.cooldown],
-    [workout]
-  )
+  const allExercises = useMemo(() => [...workout.warmup, ...workout.main, ...workout.cooldown], [workout])
 
   useEffect(() => {
     if (sessionJustCompleted) return
@@ -127,16 +116,16 @@ export default function TodayPage() {
     )
   }
 
-  const handleStartSession = async (readiness: Readiness) => {
+  const handleStartSession = async (selectedReadiness: Readiness) => {
     if (allExercises.length === 0) return
+    setReadiness(selectedReadiness)
     const dbTime: 30 | 45 | 60 = timeSlot === 'no_rush' ? 60 : timeSlot
     try {
       const session = await createSession.mutateAsync({ session_type: sessionType, time_available: dbTime })
       try {
-        await supabase.from('workout_sessions').update({ readiness_score: readiness }).eq('id', session.id)
+        await supabase.from('workout_sessions').update({ readiness_score: selectedReadiness }).eq('id', session.id)
       } catch { /* column may not exist yet */ }
-      // Store readiness so PT chat can reference it during the session
-      sessionStorage.setItem('session_readiness', readiness)
+      sessionStorage.setItem('session_readiness', selectedReadiness)
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create session:', err) }
@@ -159,7 +148,7 @@ export default function TodayPage() {
       })
     }
     setSessionJustCompleted(true)
-    setView('post')
+    setView('done')
   }
 
   const handlePainFollowUp = async (response: 'better' | 'same' | 'worse') => {
@@ -167,24 +156,25 @@ export default function TodayPage() {
     try {
       const rec = lastSessionData as Record<string, unknown>
       await supabase.from('pain_logs').insert({
-        user_id: user.id,
-        session_id: null,
+        user_id: user.id, session_id: null,
         pain_note: typeof rec.pain_note === 'string' ? rec.pain_note : 'unspecified',
-        checkin_response: response,
-        logged_at: new Date().toISOString(),
+        checkin_response: response, logged_at: new Date().toISOString(),
       })
       queryClient.invalidateQueries({ queryKey: ['last_session', user.id] })
-    } catch { /* pain_logs table may not exist yet */ }
+    } catch { /* pain_logs may not exist yet */ }
   }
 
   const handleSessionEnd = () => { setSessionJustCompleted(true); setView('post') }
 
   const handleDone = () => {
     setSessionJustCompleted(false)
+    setReadiness(null)
+    sessionStorage.removeItem('session_readiness')
     queryClient.invalidateQueries({ queryKey: ['last_session', user?.id] })
     queryClient.invalidateQueries({ queryKey: ['user_score', user?.id] })
     queryClient.invalidateQueries({ queryKey: ['session_history', user?.id] })
-    setView(isRestDay ? 'recovery' : 'preview')
+    queryClient.invalidateQueries({ queryKey: ['completed_session_count', user?.id] })
+    setView('done')
   }
 
   const hour = new Date().getHours()
@@ -193,6 +183,20 @@ export default function TodayPage() {
   return (
     <div className="flex flex-col pt-6">
       <AnimatePresence mode="wait">
+
+        {view === 'done' && (
+          <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="flex flex-col items-center justify-center min-h-[70vh] gap-6 text-center"
+          >
+            <Wordmark />
+            <div className="flex flex-col gap-2">
+              <p className="text-5xl">💪</p>
+              <h1 className="text-3xl font-black text-text-primary">SESSION DONE.</h1>
+              <p className="text-text-secondary text-sm">Rest. Recover. Come back stronger.</p>
+            </div>
+            <p className="text-text-disabled text-xs">See you next session.</p>
+          </motion.div>
+        )}
 
         {view === 'recovery' && (
           <motion.div key="recovery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

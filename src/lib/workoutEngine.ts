@@ -1,4 +1,4 @@
-import type { Exercise, SessionType, MovementPattern } from '@/types/app.types'
+import type { Exercise, SessionType, MovementPattern, Readiness } from '@/types/app.types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,8 +15,6 @@ export interface SessionConfig {
 }
 
 // ── Schedule cycles ──────────────────────────────────────────────────────────
-// Each array is one full rotation. Rest days are explicit so the math is exact.
-// Science: schedule built from training start date, NOT day of week.
 
 const CYCLES: Record<SplitPreference, Record<number, SessionType[]>> = {
   full_body: {
@@ -57,30 +55,20 @@ export function getSessionType(
   completedSessionCount: number = 0
 ): SessionType {
   const cycle = getCycle(splitPreference, trainingDays)
-
-  // If the user has never completed a session, always give them a workout.
-  // This prevents the frustrating "rest day on day 1" problem.
   if (completedSessionCount === 0) {
-    // Return first non-rest session type from the cycle
     const firstWorkout = cycle.find((s) => s !== 'rest' && s !== 'active_recovery')
     return firstWorkout ?? 'full_body'
   }
-
   if (!trainingStartDate) {
-    // Fallback: use day of week if no start date
     const day = new Date().getDay()
     return cycle[day % cycle.length]
   }
-
-  // Calculate days elapsed since training start
   const start = new Date(trainingStartDate)
   const today = new Date()
   start.setHours(0, 0, 0, 0)
   today.setHours(0, 0, 0, 0)
-  const msPerDay = 1000 * 60 * 60 * 24
-  const daysElapsed = Math.floor((today.getTime() - start.getTime()) / msPerDay)
+  const daysElapsed = Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   const dayIndex = ((daysElapsed % cycle.length) + cycle.length) % cycle.length
-
   return cycle[dayIndex]
 }
 
@@ -100,22 +88,28 @@ function timePerMainExercise(sets: number, restSeconds: number): number {
   return sets * SET_WORK_SECONDS + (sets - 1) * restSeconds + TRANSITION_SECONDS
 }
 
-export function getSessionConfig(time: TimeSlot): SessionConfig {
+export function getSessionConfig(time: TimeSlot, readiness?: Readiness | null): SessionConfig {
   if (time === 'no_rush') {
+    const sets = readiness === 'tired' ? 3 : 4
     return {
-      warmupCount: 5,
-      cooldownCount: 5,
-      setsPerExercise: 4,
-      baseRestSeconds: 90,
-      mainCount: 6,
-      totalMinutes: null,
+      warmupCount: 5, cooldownCount: 5,
+      setsPerExercise: sets, baseRestSeconds: readiness === 'great' ? 75 : 90,
+      mainCount: readiness === 'tired' ? 5 : 6, totalMinutes: null,
     }
   }
 
   const setsMap: Record<number, number> = { 30: 2, 45: 3, 60: 4 }
   const baseRestMap: Record<number, number> = { 30: 60, 45: 75, 60: 90 }
-  const sets = setsMap[time] ?? 3
-  const baseRest = baseRestMap[time] ?? 75
+  let sets = setsMap[time] ?? 3
+  let baseRest = baseRestMap[time] ?? 75
+
+  // Readiness adjustments
+  if (readiness === 'tired') {
+    sets = Math.max(2, sets - 1)      // one fewer set per exercise
+    baseRest = baseRest + 15          // more recovery time
+  } else if (readiness === 'great') {
+    baseRest = Math.max(45, baseRest - 10) // slightly shorter rest
+  }
 
   const warmupCount = time === 30 ? 2 : time === 45 ? 3 : 4
   const cooldownCount = time === 30 ? 2 : time === 45 ? 3 : 4
@@ -124,16 +118,11 @@ export function getSessionConfig(time: TimeSlot): SessionConfig {
   const perExercise = timePerMainExercise(sets, baseRest)
   const rawMain = Math.floor(availableForMain / perExercise)
   const maxMain: Record<number, number> = { 30: 4, 45: 5, 60: 7 }
-  const mainCount = Math.min(Math.max(rawMain, 3), maxMain[time] ?? 5)
+  // If tired, cap main exercises one lower
+  const mainCap = readiness === 'tired' ? (maxMain[time] ?? 5) - 1 : (maxMain[time] ?? 5)
+  const mainCount = Math.min(Math.max(rawMain, 3), mainCap)
 
-  return {
-    warmupCount,
-    cooldownCount,
-    setsPerExercise: sets,
-    baseRestSeconds: baseRest,
-    mainCount,
-    totalMinutes: time,
-  }
+  return { warmupCount, cooldownCount, setsPerExercise: sets, baseRestSeconds: baseRest, mainCount, totalMinutes: time }
 }
 
 // ── Dynamic rest ─────────────────────────────────────────────────────────────
@@ -148,16 +137,13 @@ export function calculateRestSeconds(
     muscleGroup === 'squat' || muscleGroup === 'hinge' ? 'lower'
     : muscleGroup === 'core' ? 'core'
     : 'upper'
-
   let rest = BASE_REST[groupType]
-
   if (lastEffort === 'easy') rest -= 15
   else if (lastEffort === 'hard') {
     if (consecutiveHardSets >= 3) rest += 60
     else if (consecutiveHardSets >= 2) rest += 45
     else rest += 30
   }
-
   if (timeSlot === 30) rest = Math.min(rest, 60)
   return Math.max(30, rest)
 }
@@ -180,28 +166,24 @@ export function buildWorkout(
   timeSlot: TimeSlot,
   progressionLevels: Record<MovementPattern, number>,
   equipment: string[],
-  allExercises: Exercise[]
+  allExercises: Exercise[],
+  readiness?: Readiness | null
 ): { warmup: Exercise[]; main: Exercise[]; cooldown: Exercise[]; config: SessionConfig } {
-  const config = getSessionConfig(timeSlot)
+  const config = getSessionConfig(timeSlot, readiness)
   const patternSlots = (SESSION_PATTERNS[sessionType] ?? []).slice(0, config.mainCount)
   const expandedEquipment = expandEquipment(equipment)
-
   const usedIds = new Set<string>()
   const main: Exercise[] = []
 
   for (const pattern of patternSlots) {
     const level = progressionLevels[pattern] ?? 1
     const exercise = pickExercise(pattern, level, expandedEquipment, allExercises, usedIds)
-    if (exercise) {
-      main.push(exercise)
-      usedIds.add(exercise.id)
-    }
+    if (exercise) { main.push(exercise); usedIds.add(exercise.id) }
   }
 
   const musclesWorked = [...new Set(main.map((e) => e.muscle_group))]
   const warmup = pickBookend(true, musclesWorked, config.warmupCount, allExercises)
   const cooldown = pickBookend(false, musclesWorked, config.cooldownCount, allExercises)
-
   return { warmup, main, cooldown, config }
 }
 
@@ -214,34 +196,18 @@ export function buildRecoverySession(
   allExercises: Exercise[]
 ): { exercises: Exercise[]; setsPerExercise: number } {
   const main: Exercise[] = []
-
   if (mode === 'skill_practice') {
     const level = progressionLevels[weakestPattern] ?? 1
     const match = allExercises.find(
-      (e) =>
-        !e.is_warmup &&
-        !e.is_cooldown &&
-        e.muscle_group === weakestPattern &&
-        e.progression_level === level
+      (e) => !e.is_warmup && !e.is_cooldown && e.muscle_group === weakestPattern && e.progression_level === level
     )
     if (match) main.push(match)
   }
-
-  // Fill with core + warmup exercises (low impact)
   const filler = allExercises
-    .filter(
-      (e) =>
-        (e.is_warmup || e.muscle_group === 'core') &&
-        !e.is_cooldown &&
-        !main.find((m) => m.id === e.id)
-    )
+    .filter((e) => (e.is_warmup || e.muscle_group === 'core') && !e.is_cooldown && !main.find((m) => m.id === e.id))
     .slice(0, 4)
-
   main.push(...filler)
-
-  // Always end with 2 cooldown stretches
   const cooldown = allExercises.filter((e) => e.is_cooldown).slice(0, 2)
-
   return { exercises: [...main, ...cooldown], setsPerExercise: 2 }
 }
 
@@ -261,11 +227,8 @@ function canUseEquipment(required: string, available: string[]): boolean {
 }
 
 function pickExercise(
-  pattern: MovementPattern,
-  level: number,
-  equipment: string[],
-  allExercises: Exercise[],
-  usedIds: Set<string>
+  pattern: MovementPattern, level: number, equipment: string[],
+  allExercises: Exercise[], usedIds: Set<string>
 ): Exercise | null {
   const candidates = allExercises.filter(
     (e) => !e.is_warmup && !e.is_cooldown && e.muscle_group === pattern && !usedIds.has(e.id)
@@ -281,15 +244,10 @@ function pickExercise(
 }
 
 function pickBookend(
-  isWarmup: boolean,
-  musclesWorked: string[],
-  count: number,
-  allExercises: Exercise[]
+  isWarmup: boolean, musclesWorked: string[], count: number, allExercises: Exercise[]
 ): Exercise[] {
   const targeted = allExercises.filter(
-    (e) =>
-      (isWarmup ? e.is_warmup : e.is_cooldown) &&
-      e.applicable_for.some((m) => musclesWorked.includes(m))
+    (e) => (isWarmup ? e.is_warmup : e.is_cooldown) && e.applicable_for.some((m) => musclesWorked.includes(m))
   )
   const generic = allExercises.filter(
     (e) => (isWarmup ? e.is_warmup : e.is_cooldown) && !targeted.find((t) => t.id === e.id)
@@ -297,14 +255,8 @@ function pickBookend(
   return [...targeted, ...generic].slice(0, count)
 }
 
-export function getSetsForTime(time: TimeSlot): number {
-  return getSessionConfig(time).setsPerExercise
-}
-
-export function estimateCalories(totalSets: number, avgReps: number): number {
-  return Math.round(totalSets * avgReps * 0.5)
-}
-
+export function getSetsForTime(time: TimeSlot): number { return getSessionConfig(time).setsPerExercise }
+export function estimateCalories(totalSets: number, avgReps: number): number { return Math.round(totalSets * avgReps * 0.5) }
 export function sessionTypeLabel(type: SessionType): string {
   const labels: Record<SessionType, string> = {
     push: 'PUSH DAY', pull: 'PULL DAY', legs: 'LEG DAY',
@@ -312,13 +264,11 @@ export function sessionTypeLabel(type: SessionType): string {
   }
   return labels[type] ?? 'WORKOUT'
 }
-
 export function timeSlotLabel(slot: TimeSlot): string {
   if (slot === 'no_rush') return 'NO RUSH'
   if (slot === 60) return '60 MIN+'
   return `${slot} MIN`
 }
-
 export function splitLabel(split: SplitPreference): string {
   const labels: Record<SplitPreference, string> = {
     full_body: 'Full Body', ppl: 'Push / Pull / Legs',
@@ -326,7 +276,6 @@ export function splitLabel(split: SplitPreference): string {
   }
   return labels[split]
 }
-
 export function estimateSessionMinutes(config: SessionConfig): number {
   if (config.totalMinutes === null) return 75
   const bookends = (config.warmupCount + config.cooldownCount) * BOOKEND_SECONDS
