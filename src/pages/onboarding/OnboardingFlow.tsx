@@ -1,4 +1,3 @@
-// src/pages/onboarding/OnboardingFlow.tsx
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -32,18 +31,10 @@ export default function OnboardingFlow() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const steps = [
-    GoalStep,
-    FrequencyStep,
-    EnvironmentStep,
-    EquipmentStep,
-    SplitPreferenceStep,
-    LimitationsStep,
-    BenchmarkIntro,
-    PushupBenchmark,
-    PullupBenchmark,
-    SquatBenchmark,
-    FitnessLevelStep,
-    OnboardingComplete,
+    GoalStep, FrequencyStep, EnvironmentStep, EquipmentStep,
+    SplitPreferenceStep, LimitationsStep, BenchmarkIntro,
+    PushupBenchmark, PullupBenchmark, SquatBenchmark,
+    FitnessLevelStep, OnboardingComplete,
   ]
 
   const handleNext = (stepData: Partial<OnboardingData>) => {
@@ -56,9 +47,7 @@ export default function OnboardingFlow() {
     }
   }
 
-  const handleBack = () => {
-    if (step > 0) setStep(s => s - 1)
-  }
+  const handleBack = () => { if (step > 0) setStep(s => s - 1) }
 
   const handleSubmit = async (finalData: OnboardingData) => {
     if (!user) return
@@ -66,6 +55,7 @@ export default function OnboardingFlow() {
     setSubmitError(null)
 
     try {
+      // 1. Save user profile
       const { error: profileError } = await supabase
         .from('user_profile')
         .upsert({
@@ -90,28 +80,52 @@ export default function OnboardingFlow() {
           level_core: finalData.level_core ?? 1,
           onboarding_complete: true,
         })
-
       if (profileError) throw profileError
 
+      // 2. Initialise score row with all required columns
+      // Try new column names first, fall back to old ones
       const { error: scoreError } = await supabase
         .from('user_score')
-        .upsert({ user_id: user.id }, { onConflict: 'user_id' })
-      if (scoreError) console.error('Score init error:', scoreError)
+        .upsert({
+          user_id: user.id,
+          total_exp: 0,
+          weekly_exp: 0,
+          week_start: new Date().toISOString().split('T')[0],
+          current_streak: 0,
+          longest_streak: 0,
+          total_sessions: 0,
+          total_reps: 0,
+          user_level: 1,
+          user_level_title: 'Untrained',
+        }, { onConflict: 'user_id' })
 
+      // If new columns don't exist yet, fall back to old schema
+      if (scoreError) {
+        await supabase
+          .from('user_score')
+          .upsert({ user_id: user.id }, { onConflict: 'user_id' })
+      }
+
+      // 3. Initialise settings
       const { error: settingsError } = await supabase
         .from('user_settings')
-        .upsert({ user_id: user.id }, { onConflict: 'user_id' })
+        .upsert({
+          user_id: user.id,
+          weight_unit: 'kg',
+          ai_mode: 'lite',
+        }, { onConflict: 'user_id' })
       if (settingsError) console.error('Settings init error:', settingsError)
 
+      // 4. Initialise progression for all 5 patterns
       const { error: progressionError } = await supabase
         .from('user_progression')
         .upsert(
           [
-            { user_id: user.id, movement_pattern: 'push', current_level: finalData.level_push ?? 1 },
-            { user_id: user.id, movement_pattern: 'pull', current_level: finalData.level_pull ?? 1 },
-            { user_id: user.id, movement_pattern: 'squat', current_level: finalData.level_squat ?? 1 },
-            { user_id: user.id, movement_pattern: 'hinge', current_level: finalData.level_hinge ?? 1 },
-            { user_id: user.id, movement_pattern: 'core', current_level: finalData.level_core ?? 1 },
+            { user_id: user.id, movement_pattern: 'push',  current_level: finalData.level_push  ?? 1, sessions_at_level: 0, consecutive_easy: 0, consecutive_hard: 0 },
+            { user_id: user.id, movement_pattern: 'pull',  current_level: finalData.level_pull  ?? 1, sessions_at_level: 0, consecutive_easy: 0, consecutive_hard: 0 },
+            { user_id: user.id, movement_pattern: 'squat', current_level: finalData.level_squat ?? 1, sessions_at_level: 0, consecutive_easy: 0, consecutive_hard: 0 },
+            { user_id: user.id, movement_pattern: 'hinge', current_level: finalData.level_hinge ?? 1, sessions_at_level: 0, consecutive_easy: 0, consecutive_hard: 0 },
+            { user_id: user.id, movement_pattern: 'core',  current_level: finalData.level_core  ?? 1, sessions_at_level: 0, consecutive_easy: 0, consecutive_hard: 0 },
           ],
           { onConflict: 'user_id,movement_pattern' }
         )
@@ -148,11 +162,9 @@ export default function OnboardingFlow() {
             <div
               key={i}
               className={`h-1 rounded-full transition-all duration-300 ${
-                i === dotIndex
-                  ? 'w-6 bg-accent'
-                  : i < dotIndex
-                  ? 'w-3 bg-text-secondary'
-                  : 'w-3 bg-surface-raised'
+                i === dotIndex ? 'w-6 bg-accent'
+                : i < dotIndex ? 'w-3 bg-text-secondary'
+                : 'w-3 bg-surface-raised'
               }`}
             />
           ))}

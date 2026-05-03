@@ -98,3 +98,20 @@ export function useLastWeekSummary() {
     enabled: !!user,
   })
 }
+
+export function useWeightHistory() {
+  const { user } = useAuthStore()
+  return useQuery({
+    queryKey: ['weight_history', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('body_logs')
+        .select('weight, unit, logged_at')
+        .eq('user_id', user!.id)
+        .order('logged_at', { ascending: false })
+        .limit(14)
+      return (data ?? []) as { weight: number; unit: string; logged_at: string }[]
+    },
+    enabled: !!user,
+  })
+}
