@@ -32,11 +32,25 @@ export function shouldRegress(
   return last3avg <= first3avg
 }
 
+// Safely extract exercise data from a Supabase join result.
+// The join can return a single object or an array — we handle both
+// without any type casting to avoid Vercel's strict TS build errors.
+function extractExerciseData(
+  raw: unknown
+): { muscle_group: string; target_reps_min: number } | null {
+  const obj = Array.isArray(raw) ? raw[0] : raw
+  if (!obj || typeof obj !== 'object') return null
+  const rec = obj as Record<string, unknown>
+  const muscle_group = typeof rec.muscle_group === 'string' ? rec.muscle_group : null
+  const target_reps_min = typeof rec.target_reps_min === 'number' ? rec.target_reps_min : 8
+  if (!muscle_group) return null
+  return { muscle_group, target_reps_min }
+}
+
 export async function runProgressionCheck(
   userId: string,
   sessionId: string
 ): Promise<boolean> {
-  // Get all non-skipped logs for this session with exercise data
   const { data: logs, error: logsErr } = await supabase
     .from('exercise_logs')
     .select('effort, reps, exercise_id, exercises(muscle_group, target_reps_min)')
@@ -45,7 +59,6 @@ export async function runProgressionCheck(
 
   if (logsErr || !logs || logs.length === 0) return false
 
-  // Get current user progressions for all patterns
   const { data: progressions, error: progErr } = await supabase
     .from('user_progression')
     .select('*')
@@ -55,7 +68,6 @@ export async function runProgressionCheck(
 
   let anyProgressed = false
 
-  // Group logs by movement pattern
   const byPattern: Record<string, {
     efforts: Effort[]
     reps: number[]
@@ -63,12 +75,12 @@ export async function runProgressionCheck(
   }> = {}
 
   for (const log of logs) {
-    const ex = log.exercises as { muscle_group: string; target_reps_min: number | null } | null
+    const ex = extractExerciseData(log.exercises)
     if (!ex) continue
     const pattern = ex.muscle_group
     if (!['push', 'pull', 'squat', 'hinge', 'core'].includes(pattern)) continue
     if (!byPattern[pattern]) {
-      byPattern[pattern] = { efforts: [], reps: [], targetRepsMin: ex.target_reps_min ?? 8 }
+      byPattern[pattern] = { efforts: [], reps: [], targetRepsMin: ex.target_reps_min }
     }
     if (log.effort) byPattern[pattern].efforts.push(log.effort as Effort)
     if (log.reps != null) byPattern[pattern].reps.push(log.reps as number)
