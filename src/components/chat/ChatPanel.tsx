@@ -7,27 +7,41 @@ interface Props {
   sessionId: string | null
 }
 
+function getGreeting(exerciseName: string | undefined, readiness: string | null): string {
+  if (readiness === 'tired') return `You said you're tired today — that's fine. Let's get through it. Tell me your reps or how it felt.`
+  if (readiness === 'great') return `Good energy today. Tell me your reps after each set and I'll track everything.`
+  if (exerciseName) return `Starting with ${exerciseName}. Log your reps after each set — just type a number.`
+  return `Tell me your reps after each set. Just type a number.`
+}
+
 export function ChatPanel({ sessionId }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [input, setInput] = useState('')
+  const [greeted, setGreeted] = useState(false)
   const { messages, loading, showLoggedBar, send } = useChat(sessionId)
   const { exercises, currentExerciseIndex } = useSessionStore()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const currentExercise = exercises[currentExerciseIndex]
+  const readiness = sessionStorage.getItem('session_readiness')
 
+  // Auto-scroll when messages change
   useEffect(() => {
-    if (expanded) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
+    if (expanded) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, expanded])
 
+  // Focus input when expanded
   useEffect(() => {
-    if (expanded) {
-      setTimeout(() => inputRef.current?.focus(), 300)
-    }
+    if (expanded) setTimeout(() => inputRef.current?.focus(), 300)
   }, [expanded])
+
+  // Send greeting on first open
+  useEffect(() => {
+    if (expanded && !greeted && messages.length === 0) {
+      setGreeted(true)
+    }
+  }, [expanded, greeted, messages.length])
 
   const handleSend = async () => {
     if (!input.trim() || loading) return
@@ -40,9 +54,10 @@ export function ChatPanel({ sessionId }: Props) {
     if (e.key === 'Enter') handleSend()
   }
 
+  const greeting = getGreeting(currentExercise?.name, readiness)
+
   return (
     <>
-      {/* Backdrop */}
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -55,7 +70,6 @@ export function ChatPanel({ sessionId }: Props) {
         )}
       </AnimatePresence>
 
-      {/* Panel */}
       <motion.div
         layout
         animate={{ height: expanded ? '85vh' : 52 }}
@@ -83,7 +97,12 @@ export function ChatPanel({ sessionId }: Props) {
             onClick={() => setExpanded(true)}
             className="w-full h-[52px] flex items-center justify-between px-4"
           >
-            <span className="text-text-secondary text-sm font-bold">Chat with your PT</span>
+            <div className="flex items-center gap-2">
+              <span className="text-text-secondary text-sm font-bold">PT</span>
+              {currentExercise && (
+                <span className="text-text-disabled text-xs">· {currentExercise.name}</span>
+              )}
+            </div>
             <span className="text-accent text-lg">↑</span>
           </button>
         )}
@@ -109,29 +128,25 @@ export function ChatPanel({ sessionId }: Props) {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
-              {messages.length === 0 && (
-                <p className="text-text-disabled text-sm text-center mt-4">
-                  Tell me your reps, effort, or just talk.
-                </p>
-              )}
+              {/* Greeting — shown as a PT message before any real messages */}
+              <div className="flex justify-start">
+                <div className="max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2 text-sm bg-navbar border-l-4 border-accent text-text-primary">
+                  {greeting}
+                </div>
+              </div>
+
               {messages.map(m => (
-                <div
-                  key={m.id}
-                  className={`flex ${
-                    m.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
-                      m.role === 'user'
-                        ? 'bg-surface-raised text-text-primary rounded-br-sm'
-                        : 'bg-navbar border-l-4 border-accent text-text-primary rounded-bl-sm'
-                    }`}
-                  >
+                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
+                    m.role === 'user'
+                      ? 'bg-surface-raised text-text-primary rounded-br-sm'
+                      : 'bg-navbar border-l-4 border-accent text-text-primary rounded-bl-sm'
+                  }`}>
                     {m.content}
                   </div>
                 </div>
               ))}
+
               {loading && (
                 <div className="flex justify-start">
                   <div className="bg-navbar border-l-4 border-accent rounded-2xl rounded-bl-sm px-4 py-2">

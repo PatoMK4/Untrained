@@ -6,7 +6,7 @@ import { useUserProfile } from '@/hooks/useWorkout'
 import { useUserSettings, useScore } from '@/hooks/useScore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 
 const GOAL_LABELS: Record<string, string> = {
   strength: 'Strength', muscle: 'Muscle', endurance: 'Endurance',
@@ -38,6 +38,21 @@ export default function ProfilePage() {
   const [signingOut, setSigningOut] = useState(false)
   const [weightInput, setWeightInput] = useState('')
 
+  // Weight history
+  const { data: weightHistory, refetch: refetchWeight } = useQuery({
+    queryKey: ['weight_history', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('body_logs')
+        .select('weight, unit, logged_at')
+        .eq('user_id', user!.id)
+        .order('logged_at', { ascending: false })
+        .limit(7)
+      return (data ?? []) as { weight: number; unit: string; logged_at: string }[]
+    },
+    enabled: !!user,
+  })
+
   const showToast = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
@@ -52,12 +67,8 @@ export default function ProfilePage() {
       queryClient.invalidateQueries({ queryKey: ['user_profile', user.id] })
       setEditField(null)
       showToast('Program updated. Next session reflects your changes.')
-    } catch (err) {
-      console.error(err)
-      showToast('Something went wrong. Try again.')
-    } finally {
-      setSaving(false)
-    }
+    } catch { showToast('Something went wrong. Try again.') }
+    finally { setSaving(false) }
   }
 
   const saveSetting = async (updates: Record<string, unknown>) => {
@@ -68,7 +79,8 @@ export default function ProfilePage() {
       if (error) throw error
       queryClient.invalidateQueries({ queryKey: ['user_settings', user.id] })
       showToast('Setting saved.')
-    } catch (err) { console.error(err) } finally { setSaving(false) }
+    } catch { /* ignore */ }
+    finally { setSaving(false) }
   }
 
   const logWeight = async () => {
@@ -78,15 +90,15 @@ export default function ProfilePage() {
     setSaving(true)
     try {
       await supabase.from('body_logs').insert({
-        user_id: user.id,
-        weight,
+        user_id: user.id, weight,
         unit: settings?.weight_unit ?? 'kg',
         logged_at: new Date().toISOString(),
       })
       setWeightInput('')
       setEditField(null)
       showToast('Weight logged.')
-    } catch { showToast('Could not log weight — body_logs table may not exist yet.') }
+      refetchWeight()
+    } catch { showToast('Could not log weight.') }
     finally { setSaving(false) }
   }
 
@@ -114,6 +126,9 @@ export default function ProfilePage() {
     )
   }
 
+  const weightUnit = settings?.weight_unit ?? 'kg'
+  const latestWeight = weightHistory?.[0]
+
   return (
     <div className="flex flex-col gap-6 pt-6 pb-8">
       <Wordmark />
@@ -122,9 +137,7 @@ export default function ProfilePage() {
       <AnimatePresence>
         {toast && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
             className="fixed top-4 left-0 right-0 mx-4 z-50 bg-surface border border-accent rounded-card p-3 text-center"
           >
             <p className="text-accent text-sm font-bold">{toast}</p>
@@ -144,7 +157,7 @@ export default function ProfilePage() {
             <p className="text-text-disabled text-xs">Level {userLevel}</p>
           </div>
         </div>
-        <div className="flex gap-4 pt-2 border-t border-surface-raised">
+        <div className="flex gap-6 pt-2 border-t border-surface-raised">
           <div>
             <p className="text-text-disabled text-xs">SESSIONS</p>
             <p className="text-text-primary font-black text-lg">{totalSessions}</p>
@@ -153,6 +166,12 @@ export default function ProfilePage() {
             <p className="text-text-disabled text-xs">STREAK</p>
             <p className="text-text-primary font-black text-lg">{currentStreak} days</p>
           </div>
+          {latestWeight && (
+            <div>
+              <p className="text-text-disabled text-xs">WEIGHT</p>
+              <p className="text-text-primary font-black text-lg">{latestWeight.weight} {weightUnit}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -164,10 +183,37 @@ export default function ProfilePage() {
           className="bg-surface rounded-card p-4 flex items-center justify-between w-full active:brightness-110 transition-all min-h-[56px]"
         >
           <p className="text-text-disabled text-sm">Log today's weight</p>
-          <p className="text-text-primary text-sm font-bold">
-            {settings?.weight_unit ?? 'kg'} ›
-          </p>
+          <p className="text-text-primary text-sm font-bold">{weightUnit} ›</p>
         </button>
+
+        {/* Weight history */}
+        {weightHistory && weightHistory.length > 0 && (
+          <div className="bg-surface rounded-card p-4">
+            <p className="text-text-disabled text-xs tracking-widest mb-3">RECENT</p>
+            <div className="flex flex-col gap-2">
+              {weightHistory.map((entry, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <p className="text-text-disabled text-xs">
+                    {new Date(entry.logged_at).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </p>
+                  <p className="text-text-primary text-sm font-bold">{entry.weight} {entry.unit}</p>
+                </div>
+              ))}
+            </div>
+            {/* Simple visual trend */}
+            {weightHistory.length >= 2 && (() => {
+              const latest = weightHistory[0].weight
+              const oldest = weightHistory[weightHistory.length - 1].weight
+              const diff = latest - oldest
+              if (Math.abs(diff) < 0.1) return null
+              return (
+                <p className={`text-xs mt-3 font-bold ${diff < 0 ? 'text-success' : 'text-warning'}`}>
+                  {diff < 0 ? '↓' : '↑'} {Math.abs(diff).toFixed(1)} {weightUnit} over {weightHistory.length} logs
+                </p>
+              )
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Program section */}
@@ -207,7 +253,7 @@ export default function ProfilePage() {
             {(['kg', 'lbs'] as const).map(unit => (
               <button key={unit} onClick={() => saveSetting({ weight_unit: unit })}
                 className={`h-8 px-4 rounded-pill text-xs font-bold transition-all ${
-                  (settings?.weight_unit ?? 'kg') === unit ? 'bg-accent text-navbar' : 'text-text-secondary'
+                  weightUnit === unit ? 'bg-accent text-navbar' : 'text-text-secondary'
                 }`}
               >
                 {unit}
@@ -219,7 +265,8 @@ export default function ProfilePage() {
 
       {/* Sign out */}
       <div className="flex flex-col gap-2">
-        <Button fullWidth loading={signingOut} onClick={handleSignOut}
+        <Button
+          fullWidth loading={signingOut} onClick={handleSignOut}
           className="!bg-surface !text-text-secondary border border-surface-raised"
         >
           SIGN OUT
@@ -250,18 +297,18 @@ export default function ProfilePage() {
                     <input
                       type="number"
                       value={weightInput}
-                      onChange={(e) => setWeightInput(e.target.value)}
-                      placeholder={`e.g. 80`}
+                      onChange={e => setWeightInput(e.target.value)}
+                      placeholder="e.g. 80"
                       className="flex-1 h-14 bg-surface-raised rounded-card px-4 text-text-primary text-2xl font-bold border border-surface-raised focus:border-accent outline-none"
                     />
-                    <span className="text-text-secondary text-lg font-bold">{settings?.weight_unit ?? 'kg'}</span>
+                    <span className="text-text-secondary text-lg font-bold">{weightUnit}</span>
                   </div>
                   <Button fullWidth loading={saving} onClick={logWeight}>LOG</Button>
                 </div>
               ) : (
                 <EditSheet
                   field={editField as Exclude<EditField, 'weight' | null>}
-                  profile={profile}
+                  profile={profile as Record<string, unknown> | null | undefined}
                   saving={saving}
                   onSave={saveField}
                   onClose={() => setEditField(null)}
@@ -300,7 +347,7 @@ function EditSheet({
 }) {
   const [value, setValue] = useState<unknown>(field ? (profile?.[field] ?? '') : '')
   if (!field) return null
-  const handleSave = () => onSave({ [field]: value })
+
   const FIELD_LABELS: Record<string, string> = {
     goal: 'Goal', training_days: 'Training Days', environment: 'Environment',
     equipment: 'Equipment', split_preference: 'Training Split', limitations: 'Limitations',
@@ -312,17 +359,17 @@ function EditSheet({
         <h3 className="text-text-primary font-black text-xl">{FIELD_LABELS[field]}</h3>
         <button onClick={onClose} className="text-text-disabled text-2xl leading-none">×</button>
       </div>
+
       {field === 'goal' && (
         <div className="flex flex-col gap-2">
           {(['strength','muscle','endurance','weight_loss','overall'] as const).map(g => (
             <button key={g} onClick={() => setValue(g)}
               className={`h-12 rounded-card text-sm font-bold transition-all ${value === g ? 'bg-accent text-navbar' : 'bg-surface-raised text-text-primary'}`}
-            >
-              {GOAL_LABELS[g]}
-            </button>
+            >{GOAL_LABELS[g]}</button>
           ))}
         </div>
       )}
+
       {field === 'training_days' && (
         <div className="grid grid-cols-4 gap-2">
           {[2,3,4,5,6,7].map(d => (
@@ -332,6 +379,7 @@ function EditSheet({
           ))}
         </div>
       )}
+
       {field === 'environment' && (
         <div className="flex flex-col gap-2">
           {(['home','gym','both','outdoors'] as const).map(e => (
@@ -341,6 +389,7 @@ function EditSheet({
           ))}
         </div>
       )}
+
       {field === 'equipment' && (
         <div className="flex flex-col gap-2">
           {(['none','pullup_bar','rings','gym'] as const).map(eq => {
@@ -357,6 +406,7 @@ function EditSheet({
           })}
         </div>
       )}
+
       {field === 'split_preference' && (
         <div className="flex flex-col gap-2">
           {(['full_body','ppl','upper_lower','bro_split'] as const).map(s => (
@@ -366,6 +416,7 @@ function EditSheet({
           ))}
         </div>
       )}
+
       {field === 'limitations' && (
         <textarea
           value={String(value ?? '')}
@@ -374,7 +425,8 @@ function EditSheet({
           className="w-full h-28 bg-surface-raised rounded-card p-4 text-text-primary text-sm border border-surface-raised focus:border-accent outline-none resize-none"
         />
       )}
-      <Button fullWidth loading={saving} onClick={handleSave}>SAVE</Button>
+
+      <Button fullWidth loading={saving} onClick={() => onSave({ [field]: value })}>SAVE</Button>
     </div>
   )
 }

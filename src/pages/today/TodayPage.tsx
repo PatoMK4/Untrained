@@ -59,7 +59,9 @@ export default function TodayPage() {
     if (!lastSessionData) return null
     const rec = lastSessionData as Record<string, unknown>
     if (!rec.pain_flagged) return null
-    const note = typeof rec.pain_note === 'string' && rec.pain_note ? rec.pain_note : 'the discomfort you mentioned'
+    const note = typeof rec.pain_note === 'string' && rec.pain_note
+      ? rec.pain_note
+      : 'the discomfort you mentioned'
     return { note }
   }, [lastSessionData])
 
@@ -78,23 +80,36 @@ export default function TodayPage() {
 
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
-    return getSessionType(profile.training_days, splitPreference, profile.created_at, completedSessionCount ?? 0)
+    return getSessionType(
+      profile.training_days, splitPreference,
+      profile.created_at, completedSessionCount ?? 0
+    )
   }, [profile, splitPreference, completedSessionCount])
 
   const isRestDay = sessionType === 'rest' || sessionType === 'active_recovery'
 
-  // Workout rebuilds when readiness changes — readiness affects config
   const workout = useMemo(() => {
     if (!exercises || !profile || isRestDay) {
       return {
         warmup: [] as Exercise[], main: [] as Exercise[], cooldown: [] as Exercise[],
-        config: { warmupCount: 3, cooldownCount: 3, setsPerExercise: 3, baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null },
+        config: {
+          warmupCount: 3, cooldownCount: 3, setsPerExercise: 3,
+          baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null,
+        },
       }
     }
-    return buildWorkout(sessionType, timeSlot, effectiveProgressionMap, profile.equipment ?? [], exercises as Exercise[], readiness)
-  }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay, readiness])
+    // Pass both readiness AND isComeback so the engine can adjust intensity
+    const effectiveReadiness: Readiness | null = isComeback && !readiness ? 'tired' : readiness
+    return buildWorkout(
+      sessionType, timeSlot, effectiveProgressionMap,
+      profile.equipment ?? [], exercises as Exercise[], effectiveReadiness
+    )
+  }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay, readiness, isComeback])
 
-  const allExercises = useMemo(() => [...workout.warmup, ...workout.main, ...workout.cooldown], [workout])
+  const allExercises = useMemo(
+    () => [...workout.warmup, ...workout.main, ...workout.cooldown],
+    [workout]
+  )
 
   useEffect(() => {
     if (sessionJustCompleted) return
@@ -103,6 +118,16 @@ export default function TodayPage() {
     else if (isRestDay && view === 'preview') setView('recovery')
   }, [todaySession, isActive, isRestDay, sessionJustCompleted])
 
+  // Auto-reset from done state to preview after 5 seconds
+  useEffect(() => {
+    if (view !== 'done') return
+    const timer = setTimeout(() => {
+      setSessionJustCompleted(false)
+      setView(isRestDay ? 'recovery' : 'preview')
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [view, isRestDay])
+
   const isLoading = loadingEx || loadingProg || loadingProfile || completedSessionCount === undefined
 
   if (isLoading) {
@@ -110,7 +135,9 @@ export default function TodayPage() {
       <div className="flex flex-col gap-4 pt-6">
         <Wordmark />
         <div className="flex flex-col gap-3 mt-4">
-          {[1, 2, 3].map((i) => <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />)}
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />
+          ))}
         </div>
       </div>
     )
@@ -123,7 +150,10 @@ export default function TodayPage() {
     try {
       const session = await createSession.mutateAsync({ session_type: sessionType, time_available: dbTime })
       try {
-        await supabase.from('workout_sessions').update({ readiness_score: selectedReadiness }).eq('id', session.id)
+        await supabase
+          .from('workout_sessions')
+          .update({ readiness_score: selectedReadiness })
+          .eq('id', session.id)
       } catch { /* column may not exist yet */ }
       sessionStorage.setItem('session_readiness', selectedReadiness)
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
@@ -185,7 +215,11 @@ export default function TodayPage() {
       <AnimatePresence mode="wait">
 
         {view === 'done' && (
-          <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          <motion.div
+            key="done"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             className="flex flex-col items-center justify-center min-h-[70vh] gap-6 text-center"
           >
             <Wordmark />
@@ -212,7 +246,9 @@ export default function TodayPage() {
             <h1 className="text-4xl font-black mt-2 mb-4">{greeting}</h1>
             {allExercises.length === 0 ? (
               <div className="bg-surface rounded-card p-5">
-                <p className="text-text-secondary">No exercises found. Check Supabase exercise library.</p>
+                <p className="text-text-secondary">
+                  No exercises found. Check Supabase exercise library.
+                </p>
               </div>
             ) : (
               <WorkoutPreview
