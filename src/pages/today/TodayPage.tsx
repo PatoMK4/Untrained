@@ -140,7 +140,7 @@ export default function TodayPage() {
   useEffect(() => {
     if (sessionJustCompleted) return
     if (view === 'done') return
-    if (todaySessionCompleted && view !== 'post' && view !== 'done') {
+    if (todaySessionCompleted && view !== 'post') {
       setView('done')
     } else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') {
       setView('active')
