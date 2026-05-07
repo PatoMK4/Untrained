@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Wordmark } from '@/components/ui/Wordmark'
@@ -6,10 +6,10 @@ import { useScore, useSessionHistory, useLastWeekSummary } from '@/hooks/useScor
 import { useProgression, useUserProfile } from '@/hooks/useWorkout'
 import { useAuthStore } from '@/stores/authStore'
 import { ensureUserScoreRow } from '@/lib/scoreEngine'
+import { CHALLENGES, evaluateChallenges } from '@/constants/challenges'
 import { supabase } from '@/lib/supabase'
 import { useQuery } from '@tanstack/react-query'
 import type { MovementPattern } from '@/types/app.types'
-import { useEffect } from 'react'
 
 const PATTERN_LABELS: Record<MovementPattern, string> = {
   push: 'PUSH', pull: 'PULL', squat: 'SQUAT', hinge: 'HINGE', core: 'CORE',
@@ -43,7 +43,6 @@ export default function ProgressPage() {
   const [activePattern, setActivePattern] = useState<MovementPattern>('push')
   const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null)
 
-  // Ensure score row exists
   useEffect(() => {
     if (user) ensureUserScoreRow(user.id).catch(() => {})
   }, [user])
@@ -65,7 +64,6 @@ export default function ProgressPage() {
     enabled: !!user,
   })
 
-  // Personal bests: max reps per exercise ever
   const { data: personalBests } = useQuery({
     queryKey: ['personal_bests', user?.id],
     queryFn: async () => {
@@ -77,7 +75,6 @@ export default function ProgressPage() {
         .not('reps', 'is', null)
         .order('reps', { ascending: false })
         .limit(100)
-      // Group by exercise and keep the max
       const bests: Record<string, { name: string; reps: number }> = {}
       for (const log of data ?? []) {
         const ex = (log.exercises as unknown) as { name: string } | null
@@ -87,9 +84,7 @@ export default function ProgressPage() {
           bests[log.exercise_id] = { name, reps }
         }
       }
-      return Object.values(bests)
-        .sort((a, b) => b.reps - a.reps)
-        .slice(0, 5)
+      return Object.values(bests).sort((a, b) => b.reps - a.reps).slice(0, 5)
     },
     enabled: !!user && hasSessions,
   })
@@ -115,6 +110,20 @@ export default function ProgressPage() {
   const userLevel     = (scoreRow.user_level       ?? 1) as number
   const userLevelTitle = (scoreRow.user_level_title ?? 'Untrained') as string
 
+  // Completion rate: sessions completed vs sessions generated (estimated as sessions * 1.2 target)
+  const targetSessions = Math.max(totalSessions, 10)
+  const completionRate = Math.min(100, Math.round((totalSessions / targetSessions) * 100))
+
+  // Challenges evaluation
+  const challengeStatuses = evaluateChallenges({
+    totalSessions, totalReps,
+    totalSets: (history ?? []).reduce((s, r) => s + ((r as Record<string, number>).total_sets ?? 0), 0),
+    currentStreak: streak,
+  })
+
+  const completedCount = Object.values(challengeStatuses).filter(s => s === 'completed').length
+  const totalCount = CHALLENGES.length
+
   if (!hasSessions) {
     return (
       <div className="flex flex-col gap-6 pt-6">
@@ -126,15 +135,6 @@ export default function ProgressPage() {
             <div className="bg-surface rounded-card p-4 border-l-4 border-accent">
               <p className="text-text-disabled text-xs tracking-widest mb-1">PUSH — DAY ONE</p>
               <p className="text-text-primary font-bold">{profile.pushup_benchmark} push-ups</p>
-              <p className="text-text-secondary text-sm">First milestone: {profile.pushup_benchmark + 5} push-ups</p>
-            </div>
-          )}
-          {profile?.pullup_benchmark !== undefined && (
-            <div className="bg-surface rounded-card p-4 border-l-4 border-accent">
-              <p className="text-text-disabled text-xs tracking-widest mb-1">PULL — DAY ONE</p>
-              <p className="text-text-primary font-bold">
-                {profile.pullup_benchmark === 0 ? 'Working toward first pull-up' : `${profile.pullup_benchmark} pull-ups`}
-              </p>
             </div>
           )}
         </div>
@@ -154,9 +154,7 @@ export default function ProgressPage() {
 
       {/* Monday weekly summary */}
       {isMonday && lastWeekSummary && lastWeekSummary.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
           className="bg-surface rounded-card p-5 border-l-4 border-accent"
         >
           <p className="text-accent text-xs font-bold tracking-widest mb-2">LAST WEEK</p>
@@ -178,18 +176,11 @@ export default function ProgressPage() {
               </p>
             </div>
           </div>
-          <p className="text-text-secondary text-sm mt-3">
-            {lastWeekSummary.length >= 4 ? 'Strong week. Keep the momentum.'
-              : lastWeekSummary.length >= 2 ? 'Good start. Aim for one more session this week.'
-              : 'Every session counts. Build the habit.'}
-          </p>
         </motion.div>
       )}
 
-      {/* Score + level card */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
+      {/* Score + level */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
         className="bg-surface rounded-card p-5"
       >
         <div className="flex items-end justify-between mb-1">
@@ -205,31 +196,43 @@ export default function ProgressPage() {
         {weeklyScore > 0 && <p className="text-accent text-sm mt-2 font-bold">+{weeklyScore} this week</p>}
       </motion.div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-surface rounded-card p-4 flex flex-col gap-1">
-          <p className="text-text-disabled text-xs tracking-widest">STREAK</p>
-          <p className="text-text-primary font-black text-2xl">{streak}</p>
-          <p className="text-text-disabled text-xs">days</p>
+      {/* Rankings + completion + streak block */}
+      <div className="bg-surface rounded-card overflow-hidden">
+        <div className="p-5 border-b border-surface-raised">
+          <p className="text-text-disabled text-xs tracking-widest mb-1">COMPLETION RATE</p>
+          <div className="flex items-end gap-2">
+            <p className="text-5xl font-black text-text-primary">{completionRate}%</p>
+            <p className="text-text-secondary text-sm mb-1">{totalSessions} sessions</p>
+          </div>
+          <div className="mt-2 h-2 bg-surface-raised rounded-full overflow-hidden">
+            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${completionRate}%` }} />
+          </div>
         </div>
-        <div className="bg-surface rounded-card p-4 flex flex-col gap-1">
-          <p className="text-text-disabled text-xs tracking-widest">SESSIONS</p>
-          <p className="text-text-primary font-black text-2xl">{totalSessions}</p>
-          <p className="text-text-disabled text-xs">total</p>
-        </div>
-        <div className="bg-surface rounded-card p-4 flex flex-col gap-1">
-          <p className="text-text-disabled text-xs tracking-widest">BEST STREAK</p>
-          <p className="text-text-primary font-black text-2xl">{longestStreak}</p>
-          <p className="text-text-disabled text-xs">days</p>
+        <div className="grid grid-cols-2 divide-x divide-surface-raised">
+          <div className="p-4">
+            <p className="text-text-disabled text-xs tracking-widest">ACTIVE STREAK</p>
+            <p className="text-text-primary font-black text-3xl">{streak}</p>
+            <p className="text-text-disabled text-xs">DAYS ON TRACK</p>
+          </div>
+          <div className="p-4">
+            <p className="text-text-disabled text-xs tracking-widest">BEST STREAK</p>
+            <p className="text-text-primary font-black text-3xl">{longestStreak}</p>
+            <p className="text-text-disabled text-xs">DAYS</p>
+          </div>
         </div>
       </div>
 
-      {totalReps > 0 && (
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3">
         <div className="bg-surface rounded-card p-4">
-          <p className="text-text-disabled text-xs tracking-widest mb-1">TOTAL REPS LOGGED</p>
-          <p className="text-text-primary font-black text-3xl">{totalReps.toLocaleString()}</p>
+          <p className="text-text-disabled text-xs tracking-widest mb-1">TOTAL REPS</p>
+          <p className="text-text-primary font-black text-2xl">{totalReps.toLocaleString()}</p>
         </div>
-      )}
+        <div className="bg-surface rounded-card p-4">
+          <p className="text-text-disabled text-xs tracking-widest mb-1">CHALLENGES</p>
+          <p className="text-text-primary font-black text-2xl">{completedCount}<span className="text-text-disabled text-sm font-normal"> / {totalCount}</span></p>
+        </div>
+      </div>
 
       {/* Personal bests */}
       {personalBests && personalBests.length > 0 && (
@@ -249,28 +252,66 @@ export default function ProgressPage() {
         </div>
       )}
 
+      {/* Challenges */}
+      <div className="flex flex-col gap-3">
+        <p className="text-text-disabled text-xs tracking-widest">CHALLENGES</p>
+        <div className="flex flex-col gap-3">
+          {CHALLENGES.map(challenge => {
+            const status = challengeStatuses[challenge.key] ?? 'locked'
+            return (
+              <motion.div
+                key={challenge.key}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className={`bg-surface rounded-card p-4 flex items-start gap-4 border-l-4 ${
+                  status === 'completed' ? 'border-accent'
+                  : status === 'in_progress' ? 'border-warning'
+                  : 'border-surface-raised'
+                }`}
+              >
+                <span className={`text-2xl flex-shrink-0 ${status === 'locked' ? 'opacity-30' : ''}`}>
+                  {challenge.icon}
+                </span>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className={`font-black text-base ${status === 'locked' ? 'text-text-disabled' : 'text-text-primary'}`}>
+                      {challenge.title}
+                    </p>
+                    <span className={`text-xs font-bold tracking-widest px-2 py-0.5 rounded-pill ${
+                      status === 'completed' ? 'bg-accent/20 text-accent'
+                      : status === 'in_progress' ? 'bg-warning/20 text-warning'
+                      : 'bg-surface-raised text-text-disabled'
+                    }`}>
+                      {status === 'completed' ? 'DONE' : status === 'in_progress' ? 'IN PROGRESS' : 'LOCKED'}
+                    </span>
+                  </div>
+                  <p className={`text-sm ${status === 'locked' ? 'text-text-disabled' : 'text-text-secondary'}`}>
+                    {challenge.description}
+                  </p>
+                  <p className="text-accent text-xs font-bold mt-1">+{challenge.xpReward} XP</p>
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
+      </div>
+
       {/* This week */}
       {weekActivity && weekActivity.length > 0 && (
         <div className="flex flex-col gap-3">
           <p className="text-text-disabled text-xs tracking-widest">THIS WEEK</p>
           {weekActivity.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => setSelectedSession(s)}
+            <button key={i} onClick={() => setSelectedSession(s)}
               className="bg-surface rounded-card p-4 flex items-center justify-between w-full text-left active:brightness-110 transition-all"
             >
               <div>
-                <p className="text-text-primary font-bold text-sm">
-                  {SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}
-                </p>
+                <p className="text-text-primary font-bold text-sm">{SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}</p>
                 <p className="text-text-disabled text-xs">
                   {new Date(s.date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
                 </p>
               </div>
               <div className="text-right">
-                {s.total_sets > 0 && (
-                  <p className="text-text-secondary text-sm">{s.total_sets} sets · {s.total_reps} reps</p>
-                )}
+                {s.total_sets > 0 && <p className="text-text-secondary text-sm">{s.total_sets} sets · {s.total_reps} reps</p>}
                 {s.score_awarded > 0 && <p className="text-accent text-xs font-bold">+{s.score_awarded} pts</p>}
               </div>
             </button>
@@ -319,15 +360,11 @@ export default function ProgressPage() {
         <div className="flex flex-col gap-3 pb-6">
           <p className="text-text-disabled text-xs tracking-widest">RECENT SESSIONS</p>
           {(history as SessionRow[]).slice(0, 10).map((s, i) => (
-            <button
-              key={i}
-              onClick={() => setSelectedSession(s)}
+            <button key={i} onClick={() => setSelectedSession(s)}
               className="bg-surface rounded-card p-4 flex items-center justify-between w-full text-left active:brightness-110 transition-all"
             >
               <div>
-                <p className="text-text-primary font-bold text-sm">
-                  {SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}
-                </p>
+                <p className="text-text-primary font-bold text-sm">{SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}</p>
                 <p className="text-text-disabled text-xs">
                   {new Date(s.date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
                 </p>
@@ -346,16 +383,12 @@ export default function ProgressPage() {
         {selectedSession && (
           <>
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.6 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 0.6 }} exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black z-40"
               onClick={() => setSelectedSession(null)}
             />
             <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
               className="fixed bottom-0 left-0 right-0 bg-surface rounded-t-2xl p-6 z-50 max-h-[70vh] overflow-y-auto"
             >
@@ -370,7 +403,6 @@ export default function ProgressPage() {
                 </div>
                 <button onClick={() => setSelectedSession(null)} className="text-text-disabled text-2xl w-10 h-10 flex items-center justify-center">×</button>
               </div>
-
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-surface-raised rounded-card p-3 text-center">
                   <p className="text-text-disabled text-xs">SETS</p>
@@ -385,23 +417,18 @@ export default function ProgressPage() {
                   <p className="text-accent font-black text-xl">+{selectedSession.score_awarded}</p>
                 </div>
               </div>
-
               {selectedSession.readiness_score && (
                 <div className="bg-surface-raised rounded-card p-3 mb-3">
                   <p className="text-text-disabled text-xs mb-1">CAME IN FEELING</p>
                   <p className="text-text-primary text-sm font-bold capitalize">{selectedSession.readiness_score}</p>
                 </div>
               )}
-
               {selectedSession.post_reflection && (
                 <div className="bg-surface-raised rounded-card p-3 mb-3">
                   <p className="text-text-disabled text-xs mb-1">RATED IT</p>
-                  <p className="text-text-primary text-sm font-bold capitalize">
-                    {selectedSession.post_reflection.replace(/_/g, ' ')}
-                  </p>
+                  <p className="text-text-primary text-sm font-bold capitalize">{selectedSession.post_reflection.replace(/_/g, ' ')}</p>
                 </div>
               )}
-
               {selectedSession.pain_flagged && (
                 <div className="bg-surface-raised rounded-card p-3 border-l-4 border-warning">
                   <p className="text-warning text-xs font-bold">Pain was flagged this session</p>
