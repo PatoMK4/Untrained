@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useLogSet, useRecentLogs, useExercises } from '@/hooks/useWorkout'
 import { calculateRestSeconds } from '@/lib/workoutEngine'
+import { supabase } from '@/lib/supabase'
 import type { Effort, MovementPattern, Exercise } from '@/types/app.types'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 
@@ -12,8 +13,6 @@ interface Props {
   onSessionEnd: () => void
 }
 
-// Calorie burn: only counts actual exercise time, not rest or paused time
-// ~8 kcal/min during bodyweight exercise (conservative estimate)
 const KCAL_PER_ACTIVE_SECOND = 8 / 60
 
 function useElapsedTime(startedAt: Date | null, isPaused: boolean, totalPausedMs: number): string {
@@ -21,9 +20,7 @@ function useElapsedTime(startedAt: Date | null, isPaused: boolean, totalPausedMs
   useEffect(() => {
     if (!startedAt) return
     const interval = setInterval(() => {
-      if (!isPaused) {
-        setElapsed(Math.floor((Date.now() - startedAt.getTime() - totalPausedMs) / 1000))
-      }
+      if (!isPaused) setElapsed(Math.floor((Date.now() - startedAt.getTime() - totalPausedMs) / 1000))
     }, 1000)
     return () => clearInterval(interval)
   }, [startedAt, isPaused, totalPausedMs])
@@ -33,36 +30,25 @@ function useElapsedTime(startedAt: Date | null, isPaused: boolean, totalPausedMs
 }
 
 function CircularTimer({ seconds, total, onDismiss, onComplete }: {
-  seconds: number
-  total: number
-  onDismiss: () => void
-  onComplete: () => void
+  seconds: number; total: number; onDismiss: () => void; onComplete: () => void
 }) {
   const [remaining, setRemaining] = useState(seconds)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
-    setRemaining(seconds)
-  }, [seconds])
+  useEffect(() => { setRemaining(seconds) }, [seconds])
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
       setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(intervalRef.current!)
-          onComplete()
-          return 0
-        }
+        if (r <= 1) { clearInterval(intervalRef.current!); onComplete(); return 0 }
         return r - 1
       })
     }, 1000)
     return () => clearInterval(intervalRef.current!)
   }, [seconds, onComplete])
 
-  const progress = remaining / total
   const circumference = 2 * Math.PI * 54
-  const strokeDashoffset = circumference * (1 - progress)
-
+  const strokeDashoffset = circumference * (1 - remaining / total)
   const mins = Math.floor(remaining / 60)
   const secs = remaining % 60
 
@@ -71,12 +57,8 @@ function CircularTimer({ seconds, total, onDismiss, onComplete }: {
       <div className="relative w-36 h-36">
         <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
           <circle cx="60" cy="60" r="54" fill="none" stroke="#242424" strokeWidth="8" />
-          <circle
-            cx="60" cy="60" r="54" fill="none"
-            stroke="#C8FF00" strokeWidth="8"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
+          <circle cx="60" cy="60" r="54" fill="none" stroke="#C8FF00" strokeWidth="8"
+            strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
             style={{ transition: 'stroke-dashoffset 1s linear' }}
           />
         </svg>
@@ -87,9 +69,8 @@ function CircularTimer({ seconds, total, onDismiss, onComplete }: {
           <span className="text-text-disabled text-xs tracking-widest">REST</span>
         </div>
       </div>
-      <button
-        onClick={onDismiss}
-        className="h-10 px-6 bg-surface-raised rounded-pill text-text-secondary text-xs font-bold tracking-widest active:brightness-110"
+      <button onClick={onDismiss}
+        className="h-10 px-6 bg-surface-raised rounded-pill text-text-secondary text-xs font-bold tracking-widest"
       >
         SKIP REST
       </button>
@@ -110,13 +91,11 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const [showCue, setShowCue] = useState(false)
   const [showSwap, setShowSwap] = useState(false)
   const [swappedExercises, setSwappedExercises] = useState<Record<number, Exercise>>({})
-  const [restTotal, setRestTotal] = useState(75)
 
   const logSetMutation = useLogSet()
   const { data: allExercises } = useExercises()
   const elapsedTime = useElapsedTime(startedAt, isPaused, totalPausedMs)
 
-  // Track active exercise seconds for calorie counting (tick every second when not in rest and not paused)
   useEffect(() => {
     if (showRestTimer || isPaused || !startedAt) return
     const interval = setInterval(() => addActiveSeconds(1), 1000)
@@ -128,7 +107,6 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const rawExercise = exercises[currentExerciseIndex]
   const currentExercise = swappedExercises[currentExerciseIndex] ?? rawExercise
   const nextExerciseItem = exercises[currentExerciseIndex + 1]
-
   const isLastExercise = currentExerciseIndex === exercises.length - 1
   const isLastSet = currentSetNumber > totalSets
 
@@ -164,15 +142,14 @@ export function ActiveSession({ onSessionEnd }: Props) {
     return 'MAIN'
   }
 
-  const handleLogSet = async (reps: number | null, duration: number | null, effort: Effort) => {
+  const handleLogSet = async (reps: number | null, duration: number | null, effort: Effort, weightKg: number | null) => {
     if (!sessionId || !currentExercise) return
-    logSet({ exerciseId: currentExercise.id, setNumber: currentSetNumber, reps, durationSeconds: duration, effort, extraWeightKg: null, loggedVia: 'tap' })
+    logSet({ exerciseId: currentExercise.id, setNumber: currentSetNumber, reps, durationSeconds: duration, effort, extraWeightKg: weightKg, loggedVia: 'tap' })
     await logSetMutation.mutateAsync({
       session_id: sessionId, exercise_id: currentExercise.id,
       set_number: currentSetNumber, reps, duration_seconds: duration,
-      effort, extra_weight_kg: null, logged_via: 'tap', skipped: false, skip_reason: null,
+      effort, extra_weight_kg: weightKg, logged_via: 'tap', skipped: false, skip_reason: null,
     })
-    setRestTotal(dynamicRestSeconds)
     nextSet(effort, currentExercise.id)
   }
 
@@ -181,25 +158,40 @@ export function ActiveSession({ onSessionEnd }: Props) {
     setShowRestTimer(false)
   }
 
-  const handleSkipRest = () => {
-    setShowRestTimer(false)
-  }
-
-  const handleBack = () => {
-    // Go back to previous set (just hide rest timer if showing)
-    if (showRestTimer) setShowRestTimer(false)
+  // BACK: undo last logged set — removes from local store and deletes from Supabase
+  const handleBack = async () => {
+    if (showRestTimer) {
+      // Just dismiss rest timer — go back to set logger for the set we just did
+      setShowRestTimer(false)
+      return
+    }
+    // Undo last logged set for current exercise
+    const lastLog = [...logs].reverse().find(l => l.exerciseId === currentExercise?.id)
+    if (!lastLog || !sessionId) return
+    // Remove from local store by removing last matching log
+    const logsWithoutLast = [...logs]
+    const lastIndex = logsWithoutLast.map(l => l.exerciseId).lastIndexOf(currentExercise!.id)
+    if (lastIndex >= 0) logsWithoutLast.splice(lastIndex, 1)
+    useSessionStore.setState({ logs: logsWithoutLast, currentSetNumber: lastLog.setNumber, showRestTimer: false })
+    // Delete from Supabase — find the most recent log for this exercise+set
+    try {
+      await supabase
+        .from('exercise_logs')
+        .delete()
+        .eq('session_id', sessionId)
+        .eq('exercise_id', currentExercise!.id)
+        .eq('set_number', lastLog.setNumber)
+    } catch { /* non-fatal */ }
   }
 
   const handleSkipExercise = () => {
-    setShowCue(false)
-    setShowSwap(false)
+    setShowCue(false); setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
   }
 
   const handleNextExercise = () => {
-    setShowCue(false)
-    setShowSwap(false)
+    setShowCue(false); setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
   }
@@ -207,11 +199,6 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const handleSwap = (replacement: Exercise) => {
     setSwappedExercises(prev => ({ ...prev, [currentExerciseIndex]: replacement }))
     setShowSwap(false)
-  }
-
-  const handlePauseToggle = () => {
-    if (isPaused) resumeSession()
-    else pauseSession()
   }
 
   if (!currentExercise) {
@@ -224,33 +211,28 @@ export function ActiveSession({ onSessionEnd }: Props) {
   }
 
   return (
-    <div className="flex flex-col pt-4 pb-36 min-h-[calc(100vh-6rem)]">
-      {/* Top: progress bar + elapsed */}
+    <div className="flex flex-col pt-4 min-h-screen">
+      {/* Progress bar + elapsed */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
-          <div
-            className="h-full bg-accent transition-all duration-500"
+          <div className="h-full bg-accent transition-all duration-500"
             style={{ width: `${(currentExerciseIndex / exercises.length) * 100}%` }}
           />
         </div>
         <span className="text-text-disabled text-xs font-mono">{elapsedTime}</span>
       </div>
 
-      {/* Section label + counter */}
+      {/* Section + counter */}
       <div className="flex items-center justify-between mb-3">
         <span className="text-accent text-xs font-bold tracking-widest">{getSectionLabel()}</span>
         <span className="text-text-disabled text-xs">{currentExerciseIndex + 1} / {exercises.length}</span>
       </div>
 
-      {/* CURRENT EXERCISE label + name */}
+      {/* Exercise card */}
       <AnimatePresence mode="wait">
-        <motion.div
-          key={`${currentExerciseIndex}-${currentExercise.id}`}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.2 }}
-          className="mb-4"
+        <motion.div key={`${currentExerciseIndex}-${currentExercise.id}`}
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="mb-4"
         >
           <div className="bg-surface rounded-card p-4">
             <p className="text-text-disabled text-xs font-bold tracking-widest mb-2">CURRENT EXERCISE</p>
@@ -259,17 +241,13 @@ export function ActiveSession({ onSessionEnd }: Props) {
                 {currentExercise.name}
               </h1>
               <div className="flex gap-1 flex-shrink-0 mt-1">
-                <button
-                  onClick={() => { setShowCue(v => !v); setShowSwap(false) }}
-                  className="h-8 px-3 bg-surface-raised rounded-pill text-text-disabled text-xs font-bold"
-                >
+                <button onClick={() => { setShowCue(v => !v); setShowSwap(false) }}
+                  className="h-8 px-3 bg-surface-raised rounded-pill text-text-disabled text-xs font-bold">
                   {showCue ? 'HIDE' : 'CUE'}
                 </button>
                 {!currentExercise.is_warmup && !currentExercise.is_cooldown && (
-                  <button
-                    onClick={() => { setShowSwap(v => !v); setShowCue(false) }}
-                    className="h-8 px-3 bg-surface-raised rounded-pill text-text-disabled text-xs font-bold"
-                  >
+                  <button onClick={() => { setShowSwap(v => !v); setShowCue(false) }}
+                    className="h-8 px-3 bg-surface-raised rounded-pill text-text-disabled text-xs font-bold">
                     SWAP
                   </button>
                 )}
@@ -280,14 +258,10 @@ export function ActiveSession({ onSessionEnd }: Props) {
               <p className="text-text-disabled text-xs mt-1">Last session: {lastSessionReps} reps</p>
             )}
 
-            {/* Cue card */}
             <AnimatePresence>
               {showCue && currentExercise.cue_card?.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mt-3 flex flex-col gap-1"
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-1"
                 >
                   {currentExercise.cue_card.map((cue, i) => (
                     <p key={i} className="text-text-secondary text-xs leading-relaxed">• {cue}</p>
@@ -296,30 +270,21 @@ export function ActiveSession({ onSessionEnd }: Props) {
               )}
             </AnimatePresence>
 
-            {/* Swap panel */}
             <AnimatePresence>
               {showSwap && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mt-3 flex flex-col gap-2"
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-2"
                 >
                   <p className="text-text-disabled text-xs font-bold tracking-widest">SWAP WITH</p>
                   {swapCandidates.length === 0 ? (
                     <p className="text-text-secondary text-sm">No alternatives available.</p>
-                  ) : (
-                    swapCandidates.map(ex => (
-                      <button key={ex.id} onClick={() => handleSwap(ex)}
-                        className="h-12 bg-surface-raised rounded-card px-4 text-left text-text-primary text-sm font-bold active:brightness-110 transition-all"
-                      >
-                        {ex.name}
-                      </button>
-                    ))
-                  )}
-                  <button onClick={() => setShowSwap(false)} className="text-text-disabled text-xs text-center py-1">
-                    Cancel
-                  </button>
+                  ) : swapCandidates.map(ex => (
+                    <button key={ex.id} onClick={() => handleSwap(ex)}
+                      className="h-12 bg-surface-raised rounded-card px-4 text-left text-text-primary text-sm font-bold">
+                      {ex.name}
+                    </button>
+                  ))}
+                  <button onClick={() => setShowSwap(false)} className="text-text-disabled text-xs text-center py-1">Cancel</button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -338,48 +303,37 @@ export function ActiveSession({ onSessionEnd }: Props) {
             }`}>
               <span>S{l.setNumber}</span>
               {l.reps !== null && <span>· {l.reps}</span>}
+              {l.extraWeightKg && <span>· {l.extraWeightKg}kg</span>}
             </div>
           ))}
         </div>
       )}
 
-      {/* Regression warning */}
       {consecutiveHard >= 3 && !showRestTimer && !showSwap && (
         <div className="mb-4 bg-surface rounded-card p-3 border-l-4 border-warning">
-          <p className="text-warning text-xs font-bold">
-            {consecutiveHard} hard sets. Tap SWAP for an easier alternative.
-          </p>
+          <p className="text-warning text-xs font-bold">{consecutiveHard} hard sets. Tap SWAP for an easier alternative.</p>
         </div>
       )}
 
-      {/* Main content: rest timer or set logger */}
-      <div className="flex-1 flex flex-col justify-center">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col justify-center pb-4">
         <AnimatePresence mode="wait">
           {isPaused ? (
-            <motion.div
-              key="paused"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+            <motion.div key="paused" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="flex flex-col items-center gap-4"
             >
               <p className="text-5xl">⏸</p>
               <p className="text-text-secondary font-bold text-lg">PAUSED</p>
-              <p className="text-text-disabled text-sm">Tap resume to continue.</p>
             </motion.div>
           ) : showRestTimer ? (
-            <motion.div
-              key="rest"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
+            <motion.div key="rest" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
               className="flex flex-col items-center gap-6"
             >
               <CircularTimer
-                seconds={restTotal}
-                total={restTotal}
-                onDismiss={handleSkipRest}
+                seconds={dynamicRestSeconds}
+                total={dynamicRestSeconds}
+                onDismiss={() => setShowRestTimer(false)}
                 onComplete={handleRestComplete}
               />
               {isLastSet && (
@@ -389,12 +343,9 @@ export function ActiveSession({ onSessionEnd }: Props) {
               )}
             </motion.div>
           ) : !showSwap ? (
-            <motion.div
-              key={`set-${currentExerciseIndex}-${currentSetNumber}`}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
+            <motion.div key={`set-${currentExerciseIndex}-${currentSetNumber}`}
+              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
             >
               <SetLogger
                 setNumber={currentSetNumber}
@@ -410,9 +361,9 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </AnimatePresence>
       </div>
 
-      {/* UP NEXT card */}
+      {/* UP NEXT */}
       {nextExerciseItem && !showSwap && !isPaused && (
-        <div className="mt-4 bg-surface rounded-card p-3 flex items-center gap-3">
+        <div className="bg-surface rounded-card p-3 flex items-center gap-3 mb-3">
           <div className="flex-1">
             <p className="text-text-disabled text-xs font-bold tracking-widest">UP NEXT</p>
             <p className="text-text-primary font-bold text-sm">{nextExerciseItem.name}</p>
@@ -421,15 +372,15 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </div>
       )}
 
-      {/* Bottom stats bar */}
-      <div className="mt-4 flex items-center justify-between px-1">
+      {/* Stats bar */}
+      <div className="flex items-center justify-between px-1 mb-3">
         <div className="text-center">
           <p className="text-text-primary font-black text-lg">~{estimatedCalories}</p>
-          <p className="text-text-disabled text-xs">CALORIES</p>
+          <p className="text-text-disabled text-xs">KCAL</p>
         </div>
         <div className="text-center">
           <p className="text-text-primary font-black text-lg">{elapsedTime}</p>
-          <p className="text-text-disabled text-xs">ELAPSED</p>
+          <p className="text-text-disabled text-xs">TIME</p>
         </div>
         <div className="text-center">
           <p className="text-text-primary font-black text-lg">{currentExerciseLogs.length}/{totalSets}</p>
@@ -437,22 +388,19 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </div>
       </div>
 
-      {/* Control bar: Back | Pause | Skip */}
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={handleBack}
+      {/* Sticky control bar */}
+      <div className="sticky bottom-20 flex gap-2 bg-background pt-2 pb-2">
+        <button onClick={handleBack}
           className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all"
         >
-          ◀ BACK
+          ◀ UNDO
         </button>
-        <button
-          onClick={handlePauseToggle}
+        <button onClick={() => isPaused ? resumeSession() : pauseSession()}
           className="flex-1 h-12 bg-accent rounded-card text-navbar text-xs font-black tracking-widest active:brightness-110 transition-all"
         >
           {isPaused ? '▶ RESUME' : '⏸ PAUSE'}
         </button>
-        <button
-          onClick={handleSkipExercise}
+        <button onClick={handleSkipExercise}
           className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all"
         >
           SKIP ▶
