@@ -20,6 +20,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 type View = 'preview' | 'active' | 'post' | 'recovery' | 'done'
 
+interface RecapRow {
+  total_sets: number
+  total_reps: number
+  score_awarded: number
+  session_type: string
+  readiness_score: string | null
+  post_reflection: string | null
+  completed_at: string | null
+}
+
 export default function TodayPage() {
   const { user } = useAuthStore()
   const queryClient = useQueryClient()
@@ -49,19 +59,21 @@ export default function TodayPage() {
     enabled: !!user,
   })
 
-  // Fetch today's completed session details for the recap card
+  const todaySessionId = todaySession?.id ?? null
+  const todaySessionCompleted = todaySession?.status === 'completed'
+
   const { data: todayRecap } = useQuery({
-    queryKey: ['today_recap', user?.id, todaySession?.id],
+    queryKey: ['today_recap', user?.id, todaySessionId],
     queryFn: async () => {
-      if (!todaySession?.id) return null
+      if (!todaySessionId) return null
       const { data } = await supabase
         .from('workout_sessions')
         .select('total_sets, total_reps, score_awarded, session_type, readiness_score, post_reflection, completed_at')
-        .eq('id', todaySession.id)
+        .eq('id', todaySessionId)
         .single()
-      return data
+      return data as RecapRow | null
     },
-    enabled: !!user && !!todaySession?.id && todaySession.status === 'completed',
+    enabled: !!user && !!todaySessionId && todaySessionCompleted,
   })
 
   const isComeback = useMemo(() => {
@@ -74,7 +86,9 @@ export default function TodayPage() {
     if (!lastSessionData) return null
     const rec = lastSessionData as Record<string, unknown>
     if (!rec.pain_flagged) return null
-    const note = typeof rec.pain_note === 'string' && rec.pain_note ? rec.pain_note : 'the discomfort you mentioned'
+    const note = typeof rec.pain_note === 'string' && rec.pain_note
+      ? rec.pain_note
+      : 'the discomfort you mentioned'
     return { note }
   }, [lastSessionData])
 
@@ -83,17 +97,20 @@ export default function TodayPage() {
   const effectiveProgressionMap = useMemo((): Record<MovementPattern, number> => {
     const p = profile as Record<string, number> | undefined
     return {
-      push: p?.level_push ?? progressionMap?.push ?? 1,
-      pull: p?.level_pull ?? progressionMap?.pull ?? 1,
+      push:  p?.level_push  ?? progressionMap?.push  ?? 1,
+      pull:  p?.level_pull  ?? progressionMap?.pull  ?? 1,
       squat: p?.level_squat ?? progressionMap?.squat ?? 1,
       hinge: p?.level_hinge ?? progressionMap?.hinge ?? 1,
-      core: p?.level_core ?? progressionMap?.core ?? 1,
+      core:  p?.level_core  ?? progressionMap?.core  ?? 1,
     }
   }, [profile, progressionMap])
 
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
-    return getSessionType(profile.training_days, splitPreference, profile.created_at, completedSessionCount ?? 0)
+    return getSessionType(
+      profile.training_days, splitPreference,
+      profile.created_at, completedSessionCount ?? 0
+    )
   }, [profile, splitPreference, completedSessionCount])
 
   const isRestDay = sessionType === 'rest' || sessionType === 'active_recovery'
@@ -102,27 +119,35 @@ export default function TodayPage() {
     if (!exercises || !profile || isRestDay) {
       return {
         warmup: [] as Exercise[], main: [] as Exercise[], cooldown: [] as Exercise[],
-        config: { warmupCount: 3, cooldownCount: 3, setsPerExercise: 3, baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null },
+        config: {
+          warmupCount: 3, cooldownCount: 3, setsPerExercise: 3,
+          baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null,
+        },
       }
     }
     const effectiveReadiness: Readiness | null = isComeback && !readiness ? 'tired' : readiness
-    return buildWorkout(sessionType, timeSlot, effectiveProgressionMap, profile.equipment ?? [], exercises as Exercise[], effectiveReadiness)
+    return buildWorkout(
+      sessionType, timeSlot, effectiveProgressionMap,
+      profile.equipment ?? [], exercises as Exercise[], effectiveReadiness
+    )
   }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay, readiness, isComeback])
 
-  const allExercises = useMemo(() => [...workout.warmup, ...workout.main, ...workout.cooldown], [workout])
+  const allExercises = useMemo(
+    () => [...workout.warmup, ...workout.main, ...workout.cooldown],
+    [workout]
+  )
 
   useEffect(() => {
-    // Only auto-redirect if we haven't just completed — prevents the loop bug
     if (sessionJustCompleted) return
-    if (view === 'done') return // stay on done until user explicitly taps
-    if (todaySession?.status === 'completed' && view !== 'post' && view !== 'done') {
+    if (view === 'done') return
+    if (todaySessionCompleted && view !== 'post' && view !== 'done') {
       setView('done')
     } else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') {
       setView('active')
     } else if (isRestDay && view === 'preview') {
       setView('recovery')
     }
-  }, [todaySession, isActive, isRestDay, sessionJustCompleted, view])
+  }, [todaySession, todaySessionCompleted, isActive, isRestDay, sessionJustCompleted, view])
 
   const isLoading = loadingEx || loadingProg || loadingProfile || completedSessionCount === undefined
 
@@ -131,7 +156,9 @@ export default function TodayPage() {
       <div className="flex flex-col gap-4 pt-6">
         <Wordmark />
         <div className="flex flex-col gap-3 mt-4">
-          {[1, 2, 3].map(i => <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />)}
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />
+          ))}
         </div>
       </div>
     )
@@ -144,17 +171,25 @@ export default function TodayPage() {
     try {
       const session = await createSession.mutateAsync({ session_type: sessionType, time_available: dbTime })
       try {
-        await supabase.from('workout_sessions').update({ readiness_score: selectedReadiness }).eq('id', session.id)
-      } catch { /* column may not exist */ }
+        await supabase
+          .from('workout_sessions')
+          .update({ readiness_score: selectedReadiness })
+          .eq('id', session.id)
+      } catch { /* column may not exist yet */ }
       sessionStorage.setItem('session_readiness', selectedReadiness)
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create session:', err) }
   }
 
-  const handleStartRecoverySession = async (recoveryExercises: Exercise[], setsPerExercise: number) => {
+  const handleStartRecoverySession = async (
+    recoveryExercises: Exercise[],
+    setsPerExercise: number
+  ) => {
     try {
-      const session = await createSession.mutateAsync({ session_type: 'active_recovery', time_available: 30 })
+      const session = await createSession.mutateAsync({
+        session_type: 'active_recovery', time_available: 30,
+      })
       startSession(session.id, recoveryExercises, 30, setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create recovery session:', err) }
@@ -183,26 +218,21 @@ export default function TodayPage() {
         checkin_response: response, logged_at: new Date().toISOString(),
       })
       queryClient.invalidateQueries({ queryKey: ['last_session', user.id] })
-    } catch { /* pain_logs may not exist */ }
+    } catch { /* pain_logs may not exist yet */ }
   }
 
   const handleSessionEnd = () => { setSessionJustCompleted(true); setView('post') }
 
   const handleDone = () => {
-    setSessionJustCompleted(true) // keep true so the useEffect doesn't fight us
+    setSessionJustCompleted(true)
     setReadiness(null)
     sessionStorage.removeItem('session_readiness')
     queryClient.invalidateQueries({ queryKey: ['last_session', user?.id] })
     queryClient.invalidateQueries({ queryKey: ['user_score', user?.id] })
     queryClient.invalidateQueries({ queryKey: ['session_history', user?.id] })
     queryClient.invalidateQueries({ queryKey: ['completed_session_count', user?.id] })
-    queryClient.invalidateQueries({ queryKey: ['today_recap', user?.id] })
+    queryClient.invalidateQueries({ queryKey: ['today_recap', user?.id, todaySessionId] })
     setView('done')
-  }
-
-  const SESSION_TYPE_LABELS: Record<string, string> = {
-    full_body: 'Full Body', push: 'Push', pull: 'Pull',
-    legs: 'Legs', active_recovery: 'Recovery', rest: 'Rest',
   }
 
   const hour = new Date().getHours()
@@ -212,9 +242,12 @@ export default function TodayPage() {
     <div className="flex flex-col pt-6">
       <AnimatePresence mode="wait">
 
-        {/* DONE — session recap card that persists for the day */}
         {view === 'done' && (
-          <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          <motion.div
+            key="done"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             className="flex flex-col gap-6"
           >
             <Wordmark />
@@ -223,32 +256,37 @@ export default function TodayPage() {
               <p className="text-text-secondary text-sm mt-1">Rest. Recover. Come back stronger.</p>
             </div>
 
-            {/* Session recap */}
             {todayRecap && (
               <div className="bg-surface rounded-card p-5 flex flex-col gap-4">
                 <p className="text-text-disabled text-xs tracking-widest">TODAY'S SESSION</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <p className="text-text-disabled text-xs">SETS</p>
-                    <p className="text-text-primary font-black text-2xl">{(todayRecap as Record<string, unknown>).total_sets as number}</p>
+                    <p className="text-text-primary font-black text-2xl">{todayRecap.total_sets}</p>
                   </div>
                   <div>
                     <p className="text-text-disabled text-xs">REPS</p>
-                    <p className="text-text-primary font-black text-2xl">{(todayRecap as Record<string, unknown>).total_reps as number}</p>
+                    <p className="text-text-primary font-black text-2xl">{todayRecap.total_reps}</p>
                   </div>
                   <div>
                     <p className="text-text-disabled text-xs">SCORE</p>
-                    <p className="text-accent font-black text-2xl">+{(todayRecap as Record<string, unknown>).score_awarded as number}</p>
+                    <p className="text-accent font-black text-2xl">+{todayRecap.score_awarded}</p>
                   </div>
                 </div>
-                {(todayRecap as Record<string, unknown>).readiness_score && (
+                {todayRecap.readiness_score && (
                   <p className="text-text-secondary text-sm">
-                    Came in feeling <span className="text-text-primary font-bold capitalize">{(todayRecap as Record<string, unknown>).readiness_score as string}</span>
+                    Came in feeling{' '}
+                    <span className="text-text-primary font-bold capitalize">
+                      {todayRecap.readiness_score}
+                    </span>
                   </p>
                 )}
-                {(todayRecap as Record<string, unknown>).post_reflection && (
+                {todayRecap.post_reflection && (
                   <p className="text-text-secondary text-sm">
-                    Rated it <span className="text-text-primary font-bold capitalize">{((todayRecap as Record<string, unknown>).post_reflection as string).replace(/_/g, ' ')}</span>
+                    Rated it{' '}
+                    <span className="text-text-primary font-bold capitalize">
+                      {todayRecap.post_reflection.replace(/_/g, ' ')}
+                    </span>
                   </p>
                 )}
               </div>
@@ -272,7 +310,9 @@ export default function TodayPage() {
             <h1 className="text-4xl font-black mt-2 mb-4">{greeting}</h1>
             {allExercises.length === 0 ? (
               <div className="bg-surface rounded-card p-5">
-                <p className="text-text-secondary">No exercises found. Check Supabase exercise library.</p>
+                <p className="text-text-secondary">
+                  No exercises found. Check Supabase exercise library.
+                </p>
               </div>
             ) : (
               <WorkoutPreview
