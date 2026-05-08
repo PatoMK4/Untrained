@@ -9,18 +9,17 @@ import { supabase } from '@/lib/supabase'
 import type { Effort, MovementPattern, Exercise } from '@/types/app.types'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 
-interface Props {
-  onSessionEnd: () => void
-}
+interface Props { onSessionEnd: () => void }
 
 const KCAL_PER_ACTIVE_SECOND = 8 / 60
 
-function useElapsedTime(startedAt: Date | null, isPaused: boolean, totalPausedMs: number): string {
+function useElapsedTime(startedAt: string | null, isPaused: boolean, totalPausedMs: number): string {
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
     if (!startedAt) return
+    const startMs = new Date(startedAt).getTime()
     const interval = setInterval(() => {
-      if (!isPaused) setElapsed(Math.floor((Date.now() - startedAt.getTime() - totalPausedMs) / 1000))
+      if (!isPaused) setElapsed(Math.floor((Date.now() - startMs - totalPausedMs) / 1000))
     }, 1000)
     return () => clearInterval(interval)
   }, [startedAt, isPaused, totalPausedMs])
@@ -34,18 +33,24 @@ function CircularTimer({ seconds, total, onDismiss, onComplete }: {
 }) {
   const [remaining, setRemaining] = useState(seconds)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
 
   useEffect(() => { setRemaining(seconds) }, [seconds])
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
       setRemaining(r => {
-        if (r <= 1) { clearInterval(intervalRef.current!); onComplete(); return 0 }
+        if (r <= 1) {
+          clearInterval(intervalRef.current!)
+          onCompleteRef.current()
+          return 0
+        }
         return r - 1
       })
     }, 1000)
-    return () => clearInterval(intervalRef.current!)
-  }, [seconds, onComplete])
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [seconds])
 
   const circumference = 2 * Math.PI * 54
   const strokeDashoffset = circumference * (1 - remaining / total)
@@ -64,7 +69,7 @@ function CircularTimer({ seconds, total, onDismiss, onComplete }: {
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-3xl font-black text-text-primary font-mono">
-            {mins > 0 ? `${mins}:${secs.toString().padStart(2,'0')}` : `${secs}`}
+            {mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}`}
           </span>
           <span className="text-text-disabled text-xs tracking-widest">REST</span>
         </div>
@@ -96,11 +101,23 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const { data: allExercises } = useExercises()
   const elapsedTime = useElapsedTime(startedAt, isPaused, totalPausedMs)
 
+  // Calorie counter — use a ref to avoid stale closure interval leak
+  const showRestTimerRef = useRef(showRestTimer)
+  const isPausedRef = useRef(isPaused)
+  showRestTimerRef.current = showRestTimer
+  isPausedRef.current = isPaused
+
   useEffect(() => {
-    if (showRestTimer || isPaused || !startedAt) return
-    const interval = setInterval(() => addActiveSeconds(1), 1000)
+    if (!startedAt) return
+    const interval = setInterval(() => {
+      if (!showRestTimerRef.current && !isPausedRef.current) {
+        addActiveSeconds(1)
+      }
+    }, 1000)
     return () => clearInterval(interval)
-  }, [showRestTimer, isPaused, startedAt, addActiveSeconds])
+  // Only start/stop based on session existence, not rest/pause state
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startedAt])
 
   const estimatedCalories = Math.round(activeExerciseSeconds * KCAL_PER_ACTIVE_SECOND)
 
@@ -117,7 +134,9 @@ export function ActiveSession({ onSessionEnd }: Props) {
     if (!currentExercise) return 75
     const lastEffort = lastEffortByExercise[currentExercise.id] ?? null
     const consecutiveHard = consecutiveHardByExercise[currentExercise.id] ?? 0
-    return calculateRestSeconds(currentExercise.muscle_group as MovementPattern, lastEffort, consecutiveHard, timeSlot)
+    return calculateRestSeconds(
+      currentExercise.muscle_group as MovementPattern, lastEffort, consecutiveHard, timeSlot
+    )
   }, [currentExercise, lastEffortByExercise, consecutiveHardByExercise, timeSlot])
 
   const consecutiveHard = currentExercise ? (consecutiveHardByExercise[currentExercise.id] ?? 0) : 0
@@ -142,9 +161,14 @@ export function ActiveSession({ onSessionEnd }: Props) {
     return 'MAIN'
   }
 
-  const handleLogSet = async (reps: number | null, duration: number | null, effort: Effort, weightKg: number | null) => {
+  const handleLogSet = async (
+    reps: number | null, duration: number | null, effort: Effort, weightKg: number | null
+  ) => {
     if (!sessionId || !currentExercise) return
-    logSet({ exerciseId: currentExercise.id, setNumber: currentSetNumber, reps, durationSeconds: duration, effort, extraWeightKg: weightKg, loggedVia: 'tap' })
+    logSet({
+      exerciseId: currentExercise.id, setNumber: currentSetNumber,
+      reps, durationSeconds: duration, effort, extraWeightKg: weightKg, loggedVia: 'tap',
+    })
     await logSetMutation.mutateAsync({
       session_id: sessionId, exercise_id: currentExercise.id,
       set_number: currentSetNumber, reps, duration_seconds: duration,
@@ -155,25 +179,38 @@ export function ActiveSession({ onSessionEnd }: Props) {
 
   const handleRestComplete = () => {
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
-    setShowRestTimer(false)
+    // If last set is done, advance to next exercise automatically
+    if (isLastSet) {
+      handleNextExercise()
+    } else {
+      setShowRestTimer(false)
+    }
   }
 
-  // BACK: undo last logged set — removes from local store and deletes from Supabase
+  // Skip rest: if last set done, advance exercise. Otherwise just hide timer.
+  const handleSkipRest = () => {
+    if (isLastSet) {
+      handleNextExercise()
+    } else {
+      setShowRestTimer(false)
+    }
+  }
+
   const handleBack = async () => {
     if (showRestTimer) {
-      // Just dismiss rest timer — go back to set logger for the set we just did
       setShowRestTimer(false)
       return
     }
-    // Undo last logged set for current exercise
     const lastLog = [...logs].reverse().find(l => l.exerciseId === currentExercise?.id)
     if (!lastLog || !sessionId) return
-    // Remove from local store by removing last matching log
     const logsWithoutLast = [...logs]
     const lastIndex = logsWithoutLast.map(l => l.exerciseId).lastIndexOf(currentExercise!.id)
     if (lastIndex >= 0) logsWithoutLast.splice(lastIndex, 1)
-    useSessionStore.setState({ logs: logsWithoutLast, currentSetNumber: lastLog.setNumber, showRestTimer: false })
-    // Delete from Supabase — find the most recent log for this exercise+set
+    useSessionStore.setState({
+      logs: logsWithoutLast,
+      currentSetNumber: lastLog.setNumber,
+      showRestTimer: false,
+    })
     try {
       await supabase
         .from('exercise_logs')
@@ -184,13 +221,13 @@ export function ActiveSession({ onSessionEnd }: Props) {
     } catch { /* non-fatal */ }
   }
 
-  const handleSkipExercise = () => {
+  const handleNextExercise = () => {
     setShowCue(false); setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
   }
 
-  const handleNextExercise = () => {
+  const handleSkipExercise = () => {
     setShowCue(false); setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
@@ -211,7 +248,8 @@ export function ActiveSession({ onSessionEnd }: Props) {
   }
 
   return (
-    <div className="flex flex-col pt-4 min-h-screen">
+    <div className="flex flex-col pt-4 pb-40">
+
       {/* Progress bar + elapsed */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
@@ -284,7 +322,8 @@ export function ActiveSession({ onSessionEnd }: Props) {
                       {ex.name}
                     </button>
                   ))}
-                  <button onClick={() => setShowSwap(false)} className="text-text-disabled text-xs text-center py-1">Cancel</button>
+                  <button onClick={() => setShowSwap(false)}
+                    className="text-text-disabled text-xs text-center py-1">Cancel</button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -311,35 +350,43 @@ export function ActiveSession({ onSessionEnd }: Props) {
 
       {consecutiveHard >= 3 && !showRestTimer && !showSwap && (
         <div className="mb-4 bg-surface rounded-card p-3 border-l-4 border-warning">
-          <p className="text-warning text-xs font-bold">{consecutiveHard} hard sets. Tap SWAP for an easier alternative.</p>
+          <p className="text-warning text-xs font-bold">
+            {consecutiveHard} hard sets. Tap SWAP for an easier alternative.
+          </p>
         </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col justify-center pb-4">
+      {/* Main content: rest or set logger */}
+      <div className="mb-4">
         <AnimatePresence mode="wait">
           {isPaused ? (
             <motion.div key="paused" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex flex-col items-center gap-4"
+              className="flex flex-col items-center gap-4 py-8"
             >
               <p className="text-5xl">⏸</p>
               <p className="text-text-secondary font-bold text-lg">PAUSED</p>
             </motion.div>
           ) : showRestTimer ? (
-            <motion.div key="rest" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            <motion.div key="rest"
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
-              className="flex flex-col items-center gap-6"
+              className="flex flex-col items-center gap-6 py-4"
             >
               <CircularTimer
                 seconds={dynamicRestSeconds}
                 total={dynamicRestSeconds}
-                onDismiss={() => setShowRestTimer(false)}
+                onDismiss={handleSkipRest}
                 onComplete={handleRestComplete}
               />
-              {isLastSet && (
-                <Button fullWidth size="lg" onClick={handleNextExercise}>
-                  {isLastExercise ? 'FINISH SESSION →' : 'NEXT EXERCISE →'}
-                </Button>
+              {/* UP NEXT — only shown during rest */}
+              {nextExerciseItem && (
+                <div className="w-full bg-surface rounded-card p-3 flex items-center gap-3">
+                  <div className="flex-1">
+                    <p className="text-text-disabled text-xs font-bold tracking-widest">UP NEXT</p>
+                    <p className="text-text-primary font-bold text-sm">{nextExerciseItem.name}</p>
+                  </div>
+                  <span className="text-text-disabled text-lg">›</span>
+                </div>
               )}
             </motion.div>
           ) : !showSwap ? (
@@ -361,19 +408,8 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </AnimatePresence>
       </div>
 
-      {/* UP NEXT */}
-      {nextExerciseItem && !showSwap && !isPaused && (
-        <div className="bg-surface rounded-card p-3 flex items-center gap-3 mb-3">
-          <div className="flex-1">
-            <p className="text-text-disabled text-xs font-bold tracking-widest">UP NEXT</p>
-            <p className="text-text-primary font-bold text-sm">{nextExerciseItem.name}</p>
-          </div>
-          <span className="text-text-disabled text-lg">›</span>
-        </div>
-      )}
-
       {/* Stats bar */}
-      <div className="flex items-center justify-between px-1 mb-3">
+      <div className="flex items-center justify-between px-1 mb-4">
         <div className="text-center">
           <p className="text-text-primary font-black text-lg">~{estimatedCalories}</p>
           <p className="text-text-disabled text-xs">KCAL</p>
@@ -388,8 +424,8 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </div>
       </div>
 
-      {/* Sticky control bar */}
-      <div className="sticky bottom-20 flex gap-2 bg-background pt-2 pb-2">
+      {/* Control bar */}
+      <div className="flex gap-2 mb-2">
         <button onClick={handleBack}
           className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all"
         >
@@ -407,6 +443,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </button>
       </div>
 
+      {/* Chat — at very bottom, above tab bar */}
       <ChatPanel sessionId={sessionId} />
     </div>
   )
