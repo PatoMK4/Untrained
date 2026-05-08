@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Exercise, Effort } from '@/types/app.types'
 import type { TimeSlot } from '@/lib/workoutEngine'
 
@@ -22,13 +23,12 @@ interface SessionState {
   timeSlot: TimeSlot
   logs: SetLog[]
   painFlags: string[]
-  startedAt: Date | null
+  startedAt: string | null  // ISO string for serialisation
   showRestTimer: boolean
   isPaused: boolean
-  pausedAt: Date | null
+  pausedAt: string | null
   totalPausedMs: number
-  activeExerciseSeconds: number // seconds actually spent doing exercises (not rest, not paused)
-
+  activeExerciseSeconds: number
   lastEffortByExercise: Record<string, Effort>
   consecutiveHardByExercise: Record<string, number>
 
@@ -44,80 +44,107 @@ interface SessionState {
   endSession: () => void
 }
 
-export const useSessionStore = create<SessionState>((set) => ({
-  sessionId: null,
-  isActive: false,
-  exercises: [],
-  currentExerciseIndex: 0,
-  currentSetNumber: 1,
-  totalSets: 3,
-  timeSlot: 45,
-  logs: [],
-  painFlags: [],
-  startedAt: null,
-  showRestTimer: false,
-  isPaused: false,
-  pausedAt: null,
-  totalPausedMs: 0,
-  activeExerciseSeconds: 0,
-  lastEffortByExercise: {},
-  consecutiveHardByExercise: {},
-
-  startSession: (sessionId, exercises, timeSlot, setsPerExercise) =>
-    set({
-      sessionId, exercises, timeSlot, totalSets: setsPerExercise,
-      isActive: true, currentExerciseIndex: 0, currentSetNumber: 1,
-      logs: [], painFlags: [], startedAt: new Date(),
-      showRestTimer: false, isPaused: false, pausedAt: null,
-      totalPausedMs: 0, activeExerciseSeconds: 0,
-      lastEffortByExercise: {}, consecutiveHardByExercise: {},
-    }),
-
-  logSet: (log) => set((s) => ({ logs: [...s.logs, log] })),
-
-  nextSet: (effort, exerciseId) =>
-    set((s) => {
-      const prevConsecutive = s.consecutiveHardByExercise[exerciseId] ?? 0
-      const newConsecutive = effort === 'hard' ? prevConsecutive + 1 : 0
-      return {
-        currentSetNumber: s.currentSetNumber + 1,
-        showRestTimer: true,
-        lastEffortByExercise: { ...s.lastEffortByExercise, [exerciseId]: effort },
-        consecutiveHardByExercise: { ...s.consecutiveHardByExercise, [exerciseId]: newConsecutive },
-      }
-    }),
-
-  nextExercise: () =>
-    set((s) => ({
-      currentExerciseIndex: s.currentExerciseIndex + 1,
+export const useSessionStore = create<SessionState>()(
+  persist(
+    (set) => ({
+      sessionId: null,
+      isActive: false,
+      exercises: [],
+      currentExerciseIndex: 0,
       currentSetNumber: 1,
+      totalSets: 3,
+      timeSlot: 45 as TimeSlot,
+      logs: [],
+      painFlags: [],
+      startedAt: null,
       showRestTimer: false,
-    })),
+      isPaused: false,
+      pausedAt: null,
+      totalPausedMs: 0,
+      activeExerciseSeconds: 0,
+      lastEffortByExercise: {},
+      consecutiveHardByExercise: {},
 
-  flagPain: (kw) => set((s) => ({ painFlags: [...new Set([...s.painFlags, kw])] })),
+      startSession: (sessionId, exercises, timeSlot, setsPerExercise) =>
+        set({
+          sessionId, exercises, timeSlot, totalSets: setsPerExercise,
+          isActive: true, currentExerciseIndex: 0, currentSetNumber: 1,
+          logs: [], painFlags: [], startedAt: new Date().toISOString(),
+          showRestTimer: false, isPaused: false, pausedAt: null,
+          totalPausedMs: 0, activeExerciseSeconds: 0,
+          lastEffortByExercise: {}, consecutiveHardByExercise: {},
+        }),
 
-  setShowRestTimer: (v) => set({ showRestTimer: v }),
+      logSet: (log) => set((s) => ({ logs: [...s.logs, log] })),
 
-  pauseSession: () => set((s) => {
-    if (s.isPaused) return {}
-    return { isPaused: true, pausedAt: new Date() }
-  }),
+      nextSet: (effort, exerciseId) =>
+        set((s) => {
+          const prevConsecutive = s.consecutiveHardByExercise[exerciseId] ?? 0
+          const newConsecutive = effort === 'hard' ? prevConsecutive + 1 : 0
+          return {
+            currentSetNumber: s.currentSetNumber + 1,
+            showRestTimer: true,
+            lastEffortByExercise: { ...s.lastEffortByExercise, [exerciseId]: effort },
+            consecutiveHardByExercise: { ...s.consecutiveHardByExercise, [exerciseId]: newConsecutive },
+          }
+        }),
 
-  resumeSession: () => set((s) => {
-    if (!s.isPaused || !s.pausedAt) return {}
-    const pausedMs = Date.now() - s.pausedAt.getTime()
-    return { isPaused: false, pausedAt: null, totalPausedMs: s.totalPausedMs + pausedMs }
-  }),
+      nextExercise: () =>
+        set((s) => ({
+          currentExerciseIndex: s.currentExerciseIndex + 1,
+          currentSetNumber: 1,
+          showRestTimer: false,
+        })),
 
-  addActiveSeconds: (seconds) =>
-    set((s) => ({ activeExerciseSeconds: s.activeExerciseSeconds + seconds })),
+      flagPain: (kw) => set((s) => ({ painFlags: [...new Set([...s.painFlags, kw])] })),
 
-  endSession: () =>
-    set({
-      sessionId: null, isActive: false, exercises: [], logs: [], painFlags: [],
-      currentExerciseIndex: 0, currentSetNumber: 1, startedAt: null,
-      showRestTimer: false, isPaused: false, pausedAt: null,
-      totalPausedMs: 0, activeExerciseSeconds: 0,
-      lastEffortByExercise: {}, consecutiveHardByExercise: {},
+      setShowRestTimer: (v) => set({ showRestTimer: v }),
+
+      pauseSession: () => set((s) => {
+        if (s.isPaused) return {}
+        return { isPaused: true, pausedAt: new Date().toISOString() }
+      }),
+
+      resumeSession: () => set((s) => {
+        if (!s.isPaused || !s.pausedAt) return {}
+        const pausedMs = Date.now() - new Date(s.pausedAt).getTime()
+        return { isPaused: false, pausedAt: null, totalPausedMs: s.totalPausedMs + pausedMs }
+      }),
+
+      addActiveSeconds: (seconds) =>
+        set((s) => ({ activeExerciseSeconds: s.activeExerciseSeconds + seconds })),
+
+      endSession: () =>
+        set({
+          sessionId: null, isActive: false, exercises: [], logs: [], painFlags: [],
+          currentExerciseIndex: 0, currentSetNumber: 1, startedAt: null,
+          showRestTimer: false, isPaused: false, pausedAt: null,
+          totalPausedMs: 0, activeExerciseSeconds: 0,
+          lastEffortByExercise: {}, consecutiveHardByExercise: {},
+        }),
     }),
-}))
+    {
+      name: 'untrained-session',
+      // Only persist active session data — skip derived UI state
+      partialize: (s) => ({
+        sessionId: s.sessionId,
+        isActive: s.isActive,
+        exercises: s.exercises,
+        currentExerciseIndex: s.currentExerciseIndex,
+        currentSetNumber: s.currentSetNumber,
+        totalSets: s.totalSets,
+        timeSlot: s.timeSlot,
+        logs: s.logs,
+        painFlags: s.painFlags,
+        startedAt: s.startedAt,
+        showRestTimer: s.showRestTimer,
+        isPaused: s.isPaused,
+        pausedAt: s.pausedAt,
+        totalPausedMs: s.totalPausedMs,
+        activeExerciseSeconds: s.activeExerciseSeconds,
+        lastEffortByExercise: s.lastEffortByExercise,
+        consecutiveHardByExercise: s.consecutiveHardByExercise,
+      }),
+    }
+  )
+)
