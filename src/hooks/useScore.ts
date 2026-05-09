@@ -16,7 +16,8 @@ export function useScore() {
       return data
     },
     enabled: !!user,
-    staleTime: 1000 * 60,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -36,6 +37,7 @@ export function useSessionHistory() {
       return data ?? []
     },
     enabled: !!user,
+    staleTime: 0,
   })
 }
 
@@ -53,6 +55,8 @@ export function useUserSettings() {
       return data
     },
     enabled: !!user,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -72,6 +76,7 @@ export function useLastSession() {
       return data
     },
     enabled: !!user,
+    staleTime: 0,
   })
 }
 
@@ -96,6 +101,7 @@ export function useLastWeekSummary() {
       return data ?? []
     },
     enabled: !!user,
+    staleTime: 0,
   })
 }
 
@@ -113,5 +119,6 @@ export function useWeightHistory() {
       return (data ?? []) as { weight: number; unit: string; logged_at: string }[]
     },
     enabled: !!user,
+    staleTime: 0,
   })
 }
