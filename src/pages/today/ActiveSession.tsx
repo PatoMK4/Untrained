@@ -1,3 +1,4 @@
+// src/pages/today/ActiveSession.tsx
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SetLogger } from '@/components/workout/SetLogger'
@@ -41,11 +42,7 @@ function CircularTimer({ seconds, total, onDismiss, onComplete }: {
   useEffect(() => {
     intervalRef.current = setInterval(() => {
       setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(intervalRef.current!)
-          onCompleteRef.current()
-          return 0
-        }
+        if (r <= 1) { clearInterval(intervalRef.current!); onCompleteRef.current(); return 0 }
         return r - 1
       })
     }, 1000)
@@ -75,8 +72,7 @@ function CircularTimer({ seconds, total, onDismiss, onComplete }: {
         </div>
       </div>
       <button onClick={onDismiss}
-        className="h-10 px-6 bg-surface-raised rounded-pill text-text-secondary text-xs font-bold tracking-widest"
-      >
+        className="h-10 px-6 bg-surface-raised rounded-pill text-text-secondary text-xs font-bold tracking-widest">
         SKIP REST
       </button>
     </div>
@@ -101,7 +97,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
   const { data: allExercises } = useExercises()
   const elapsedTime = useElapsedTime(startedAt, isPaused, totalPausedMs)
 
-  // Calorie counter — use a ref to avoid stale closure interval leak
+  // Calorie counter — ref-based to avoid stale closure leak
   const showRestTimerRef = useRef(showRestTimer)
   const isPausedRef = useRef(isPaused)
   showRestTimerRef.current = showRestTimer
@@ -110,12 +106,9 @@ export function ActiveSession({ onSessionEnd }: Props) {
   useEffect(() => {
     if (!startedAt) return
     const interval = setInterval(() => {
-      if (!showRestTimerRef.current && !isPausedRef.current) {
-        addActiveSeconds(1)
-      }
+      if (!showRestTimerRef.current && !isPausedRef.current) addActiveSeconds(1)
     }, 1000)
     return () => clearInterval(interval)
-  // Only start/stop based on session existence, not rest/pause state
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startedAt])
 
@@ -134,9 +127,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
     if (!currentExercise) return 75
     const lastEffort = lastEffortByExercise[currentExercise.id] ?? null
     const consecutiveHard = consecutiveHardByExercise[currentExercise.id] ?? 0
-    return calculateRestSeconds(
-      currentExercise.muscle_group as MovementPattern, lastEffort, consecutiveHard, timeSlot
-    )
+    return calculateRestSeconds(currentExercise.muscle_group as MovementPattern, lastEffort, consecutiveHard, timeSlot)
   }, [currentExercise, lastEffortByExercise, consecutiveHardByExercise, timeSlot])
 
   const consecutiveHard = currentExercise ? (consecutiveHardByExercise[currentExercise.id] ?? 0) : 0
@@ -161,14 +152,9 @@ export function ActiveSession({ onSessionEnd }: Props) {
     return 'MAIN'
   }
 
-  const handleLogSet = async (
-    reps: number | null, duration: number | null, effort: Effort, weightKg: number | null
-  ) => {
+  const handleLogSet = async (reps: number | null, duration: number | null, effort: Effort, weightKg: number | null) => {
     if (!sessionId || !currentExercise) return
-    logSet({
-      exerciseId: currentExercise.id, setNumber: currentSetNumber,
-      reps, durationSeconds: duration, effort, extraWeightKg: weightKg, loggedVia: 'tap',
-    })
+    logSet({ exerciseId: currentExercise.id, setNumber: currentSetNumber, reps, durationSeconds: duration, effort, extraWeightKg: weightKg, loggedVia: 'tap' })
     await logSetMutation.mutateAsync({
       session_id: sessionId, exercise_id: currentExercise.id,
       set_number: currentSetNumber, reps, duration_seconds: duration,
@@ -177,54 +163,37 @@ export function ActiveSession({ onSessionEnd }: Props) {
     nextSet(effort, currentExercise.id)
   }
 
-  const handleRestComplete = () => {
-    if (navigator.vibrate) navigator.vibrate([100, 50, 100])
-    // If last set is done, advance to next exercise automatically
-    if (isLastSet) {
-      handleNextExercise()
-    } else {
-      setShowRestTimer(false)
-    }
+  const handleNextExercise = () => {
+    setShowCue(false); setShowSwap(false)
+    if (isLastExercise) onSessionEnd()
+    else nextExercise()
   }
 
-  // Skip rest: if last set done, advance exercise. Otherwise just hide timer.
+  // Rest complete: if last set done advance exercise, else show set logger
+  const handleRestComplete = () => {
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+    if (isLastSet) handleNextExercise()
+    else setShowRestTimer(false)
+  }
+
+  // Skip rest: same logic
   const handleSkipRest = () => {
-    if (isLastSet) {
-      handleNextExercise()
-    } else {
-      setShowRestTimer(false)
-    }
+    if (isLastSet) handleNextExercise()
+    else setShowRestTimer(false)
   }
 
   const handleBack = async () => {
-    if (showRestTimer) {
-      setShowRestTimer(false)
-      return
-    }
+    if (showRestTimer) { setShowRestTimer(false); return }
     const lastLog = [...logs].reverse().find(l => l.exerciseId === currentExercise?.id)
     if (!lastLog || !sessionId) return
     const logsWithoutLast = [...logs]
     const lastIndex = logsWithoutLast.map(l => l.exerciseId).lastIndexOf(currentExercise!.id)
     if (lastIndex >= 0) logsWithoutLast.splice(lastIndex, 1)
-    useSessionStore.setState({
-      logs: logsWithoutLast,
-      currentSetNumber: lastLog.setNumber,
-      showRestTimer: false,
-    })
+    useSessionStore.setState({ logs: logsWithoutLast, currentSetNumber: lastLog.setNumber, showRestTimer: false })
     try {
-      await supabase
-        .from('exercise_logs')
-        .delete()
-        .eq('session_id', sessionId)
-        .eq('exercise_id', currentExercise!.id)
-        .eq('set_number', lastLog.setNumber)
+      await supabase.from('exercise_logs').delete()
+        .eq('session_id', sessionId).eq('exercise_id', currentExercise!.id).eq('set_number', lastLog.setNumber)
     } catch { /* non-fatal */ }
-  }
-
-  const handleNextExercise = () => {
-    setShowCue(false); setShowSwap(false)
-    if (isLastExercise) onSessionEnd()
-    else nextExercise()
   }
 
   const handleSkipExercise = () => {
@@ -250,23 +219,19 @@ export function ActiveSession({ onSessionEnd }: Props) {
   return (
     <div className="flex flex-col pt-4 pb-40">
 
-      {/* Progress bar + elapsed */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
           <div className="h-full bg-accent transition-all duration-500"
-            style={{ width: `${(currentExerciseIndex / exercises.length) * 100}%` }}
-          />
+            style={{ width: `${(currentExerciseIndex / exercises.length) * 100}%` }} />
         </div>
         <span className="text-text-disabled text-xs font-mono">{elapsedTime}</span>
       </div>
 
-      {/* Section + counter */}
       <div className="flex items-center justify-between mb-3">
         <span className="text-accent text-xs font-bold tracking-widest">{getSectionLabel()}</span>
         <span className="text-text-disabled text-xs">{currentExerciseIndex + 1} / {exercises.length}</span>
       </div>
 
-      {/* Exercise card */}
       <AnimatePresence mode="wait">
         <motion.div key={`${currentExerciseIndex}-${currentExercise.id}`}
           initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
@@ -291,39 +256,33 @@ export function ActiveSession({ onSessionEnd }: Props) {
                 )}
               </div>
             </div>
-
             {lastSessionReps !== null && !showCue && !showSwap && (
               <p className="text-text-disabled text-xs mt-1">Last session: {lastSessionReps} reps</p>
             )}
-
             <AnimatePresence>
               {showCue && currentExercise.cue_card?.length > 0 && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-1"
-                >
+                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-1">
                   {currentExercise.cue_card.map((cue, i) => (
                     <p key={i} className="text-text-secondary text-xs leading-relaxed">• {cue}</p>
                   ))}
                 </motion.div>
               )}
             </AnimatePresence>
-
             <AnimatePresence>
               {showSwap && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-2"
-                >
+                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-2">
                   <p className="text-text-disabled text-xs font-bold tracking-widest">SWAP WITH</p>
-                  {swapCandidates.length === 0 ? (
-                    <p className="text-text-secondary text-sm">No alternatives available.</p>
-                  ) : swapCandidates.map(ex => (
-                    <button key={ex.id} onClick={() => handleSwap(ex)}
-                      className="h-12 bg-surface-raised rounded-card px-4 text-left text-text-primary text-sm font-bold">
-                      {ex.name}
-                    </button>
-                  ))}
-                  <button onClick={() => setShowSwap(false)}
-                    className="text-text-disabled text-xs text-center py-1">Cancel</button>
+                  {swapCandidates.length === 0
+                    ? <p className="text-text-secondary text-sm">No alternatives available.</p>
+                    : swapCandidates.map(ex => (
+                      <button key={ex.id} onClick={() => handleSwap(ex)}
+                        className="h-12 bg-surface-raised rounded-card px-4 text-left text-text-primary text-sm font-bold">
+                        {ex.name}
+                      </button>
+                    ))}
+                  <button onClick={() => setShowSwap(false)} className="text-text-disabled text-xs text-center py-1">Cancel</button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -331,7 +290,6 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </motion.div>
       </AnimatePresence>
 
-      {/* Set history pills */}
       {currentExerciseLogs.length > 0 && !showSwap && (
         <div className="flex gap-2 mb-4 flex-wrap">
           {currentExerciseLogs.map((l, i) => (
@@ -342,7 +300,7 @@ export function ActiveSession({ onSessionEnd }: Props) {
             }`}>
               <span>S{l.setNumber}</span>
               {l.reps !== null && <span>· {l.reps}</span>}
-              {l.extraWeightKg && <span>· {l.extraWeightKg}kg</span>}
+              {l.extraWeightKg !== null && l.extraWeightKg > 0 && <span>· {l.extraWeightKg}kg</span>}
             </div>
           ))}
         </div>
@@ -350,33 +308,25 @@ export function ActiveSession({ onSessionEnd }: Props) {
 
       {consecutiveHard >= 3 && !showRestTimer && !showSwap && (
         <div className="mb-4 bg-surface rounded-card p-3 border-l-4 border-warning">
-          <p className="text-warning text-xs font-bold">
-            {consecutiveHard} hard sets. Tap SWAP for an easier alternative.
-          </p>
+          <p className="text-warning text-xs font-bold">{consecutiveHard} hard sets. Tap SWAP for an easier alternative.</p>
         </div>
       )}
 
-      {/* Main content: rest or set logger */}
       <div className="mb-4">
         <AnimatePresence mode="wait">
           {isPaused ? (
             <motion.div key="paused" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex flex-col items-center gap-4 py-8"
-            >
+              className="flex flex-col items-center gap-4 py-8">
               <p className="text-5xl">⏸</p>
               <p className="text-text-secondary font-bold text-lg">PAUSED</p>
             </motion.div>
           ) : showRestTimer ? (
-            <motion.div key="rest"
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            <motion.div key="rest" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
-              className="flex flex-col items-center gap-6 py-4"
-            >
+              className="flex flex-col items-center gap-6 py-4">
               <CircularTimer
-                seconds={dynamicRestSeconds}
-                total={dynamicRestSeconds}
-                onDismiss={handleSkipRest}
-                onComplete={handleRestComplete}
+                seconds={dynamicRestSeconds} total={dynamicRestSeconds}
+                onDismiss={handleSkipRest} onComplete={handleRestComplete}
               />
               {/* UP NEXT — only shown during rest */}
               {nextExerciseItem && (
@@ -392,23 +342,19 @@ export function ActiveSession({ onSessionEnd }: Props) {
           ) : !showSwap ? (
             <motion.div key={`set-${currentExerciseIndex}-${currentSetNumber}`}
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
-            >
+              exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
               <SetLogger
-                setNumber={currentSetNumber}
-                totalSets={totalSets}
+                setNumber={currentSetNumber} totalSets={totalSets}
                 targetRepsMin={currentExercise.target_reps_min}
                 targetRepsMax={currentExercise.target_reps_max}
                 targetDurationSeconds={currentExercise.target_duration_seconds}
-                onLog={handleLogSet}
-                isLogging={logSetMutation.isPending}
+                onLog={handleLogSet} isLogging={logSetMutation.isPending}
               />
             </motion.div>
           ) : null}
         </AnimatePresence>
       </div>
 
-      {/* Stats bar */}
       <div className="flex items-center justify-between px-1 mb-4">
         <div className="text-center">
           <p className="text-text-primary font-black text-lg">~{estimatedCalories}</p>
@@ -424,26 +370,21 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </div>
       </div>
 
-      {/* Control bar */}
       <div className="flex gap-2 mb-2">
         <button onClick={handleBack}
-          className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all"
-        >
+          className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all">
           ◀ UNDO
         </button>
         <button onClick={() => isPaused ? resumeSession() : pauseSession()}
-          className="flex-1 h-12 bg-accent rounded-card text-navbar text-xs font-black tracking-widest active:brightness-110 transition-all"
-        >
+          className="flex-1 h-12 bg-accent rounded-card text-navbar text-xs font-black tracking-widest active:brightness-110 transition-all">
           {isPaused ? '▶ RESUME' : '⏸ PAUSE'}
         </button>
         <button onClick={handleSkipExercise}
-          className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all"
-        >
+          className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all">
           SKIP ▶
         </button>
       </div>
 
-      {/* Chat — at very bottom, above tab bar */}
       <ChatPanel sessionId={sessionId} />
     </div>
   )
