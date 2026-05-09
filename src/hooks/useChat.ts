@@ -1,3 +1,4 @@
+// src/hooks/useChat.ts
 import { useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
@@ -6,13 +7,12 @@ import { parseMessage } from '@/lib/chatParser'
 import { hasPainSignal } from '@/lib/painDetector'
 import { callPT } from '@/lib/anthropic'
 import { useUserSettings } from '@/hooks/useScore'
-import type { ParsedLog } from '@/types/app.types'
+import type { ParsedLog, Effort } from '@/types/app.types'
 import type { LiteContext } from '@/constants/chatScripts'
 import {
   getRepsResponse, getEffortResponse, getWeightResponse,
   getDoneResponse, getRestResponse, getSkipResponse,
   getPainResponse, getMotivationResponse, getUnknownResponse,
-  getSessionEndResponse,
 } from '@/constants/chatScripts'
 
 export interface ChatEntry {
@@ -21,36 +21,18 @@ export interface ChatEntry {
   content: string
 }
 
-// Determine Lite response using full session context
-function getLiteResponse(
-  parsed: ParsedLog,
-  msg: string,
-  ctx: LiteContext
-): string {
-  // Pain always takes priority
+function getLiteResponse(parsed: ParsedLog, msg: string, ctx: LiteContext): string {
   if (hasPainSignal(msg)) return getPainResponse()
-
   switch (parsed.type) {
-    case 'reps':
-      return getRepsResponse(parsed.reps ?? 0, parsed.effort, ctx)
-    case 'effort':
-      return parsed.effort ? getEffortResponse(parsed.effort, ctx) : getUnknownResponse(ctx)
-    case 'weight':
-      return getWeightResponse(parsed.weightKg ?? 0, ctx)
-    case 'done':
-      return getDoneResponse(ctx)
-    case 'rest':
-      return getRestResponse()
-    case 'skip':
-      return getSkipResponse(ctx)
+    case 'reps': return getRepsResponse(parsed.reps ?? 0, parsed.effort as Effort | undefined, ctx)
+    case 'effort': return parsed.effort ? getEffortResponse(parsed.effort as Effort, ctx) : getUnknownResponse(ctx)
+    case 'weight': return getWeightResponse(parsed.weightKg ?? 0, ctx)
+    case 'done': return getDoneResponse(ctx)
+    case 'rest': return getRestResponse()
+    case 'skip': return getSkipResponse(ctx)
     default: {
-      // Motivation signals
-      if (/\b(?:tired|exhausted|don'?t want to|not feeling it|struggling today|bad day|no energy|drained|burnt? out)\b/.test(msg.toLowerCase())) {
+      if (/\b(?:tired|exhausted|don'?t want to|not feeling it|struggling|bad day|no energy|drained)\b/.test(msg.toLowerCase())) {
         return getMotivationResponse(ctx)
-      }
-      // Session complete
-      if (/\b(?:done|finished|complete|all done|session over|that'?s it)\b/.test(msg.toLowerCase())) {
-        return getSessionEndResponse(ctx)
       }
       return getUnknownResponse(ctx)
     }
@@ -60,23 +42,17 @@ function getLiteResponse(
 export function useChat(sessionId: string | null) {
   const { user } = useAuthStore()
   const {
-    flagPain,
-    exercises,
-    currentExerciseIndex,
-    currentSetNumber,
-    totalSets,
-    painFlags,
-    lastEffortByExercise,
-    consecutiveHardByExercise,
+    flagPain, exercises, currentExerciseIndex,
+    currentSetNumber, totalSets, painFlags,
+    lastEffortByExercise, consecutiveHardByExercise,
+    logSet, nextSet,
   } = useSessionStore()
   const { data: settings } = useUserSettings()
   const [messages, setMessages] = useState<ChatEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [showLoggedBar, setShowLoggedBar] = useState(false)
 
-  // Pull readiness from sessionStorage (set by TodayPage at session start)
   const readiness = (sessionStorage.getItem('session_readiness') ?? null) as LiteContext['readiness']
-
   const currentExercise = exercises[currentExerciseIndex]
   const aiMode = settings?.ai_mode ?? 'lite'
 
@@ -92,26 +68,42 @@ export function useChat(sessionId: string | null) {
 
     const parsed: ParsedLog = parseMessage(userMsg)
 
-    if (parsed.type === 'reps' || parsed.type === 'effort' || parsed.type === 'weight') {
+    // When chat parses reps, actually log the set — same path as tap UI
+    if (parsed.type === 'reps' && parsed.reps !== undefined && currentExercise && sessionId && user) {
+      const effort: Effort = (parsed.effort as Effort | undefined) ?? 'medium'
+      logSet({
+        exerciseId: currentExercise.id, setNumber: currentSetNumber,
+        reps: parsed.reps, durationSeconds: null,
+        effort, extraWeightKg: null, loggedVia: 'chat',
+      })
+      try {
+        await supabase.from('exercise_logs').insert({
+          session_id: sessionId, user_id: user.id,
+          exercise_id: currentExercise.id, set_number: currentSetNumber,
+          reps: parsed.reps, duration_seconds: null,
+          effort, extra_weight_kg: null,
+          logged_via: 'chat', skipped: false, skip_reason: null,
+        })
+      } catch (err) { console.error('Failed to log set from chat:', err) }
+      nextSet(effort, currentExercise.id)
       setShowLoggedBar(true)
       setTimeout(() => setShowLoggedBar(false), 2000)
+    } else if (parsed.type === 'weight' || parsed.type === 'effort') {
+      setShowLoggedBar(true)
+      setTimeout(() => setShowLoggedBar(false), 1500)
     }
 
-    // Build Lite context from live session state
     const liteCtx: LiteContext = {
       exerciseName: currentExercise?.name,
       setNumber: currentSetNumber,
       totalSets,
       readiness,
-      consecutiveHard: currentExercise
-        ? (consecutiveHardByExercise[currentExercise.id] ?? 0)
-        : 0,
-      lastReps: null,
+      consecutiveHard: currentExercise ? (consecutiveHardByExercise[currentExercise.id] ?? 0) : 0,
+      lastReps: parsed.type === 'reps' ? (parsed.reps ?? null) : null,
     }
 
     let response = ''
     try {
-      // Use Smart only if explicitly set AND key exists
       if (aiMode === 'smart' && import.meta.env.VITE_ANTHROPIC_API_KEY) {
         const lastEffort = currentExercise ? (lastEffortByExercise[currentExercise.id] ?? null) : null
         const history = messages.map(m => ({ role: m.role, content: m.content }))
@@ -123,11 +115,9 @@ export function useChat(sessionId: string | null) {
           activePainFlags: painFlags,
         })
       } else {
-        // Lite is the default — no API, no latency, fully context-aware
         response = getLiteResponse(parsed, userMsg, liteCtx)
       }
     } catch {
-      // Smart failed — fall back to Lite silently
       response = getLiteResponse(parsed, userMsg, liteCtx)
     }
 
@@ -141,13 +131,11 @@ export function useChat(sessionId: string | null) {
           { session_id: sessionId, user_id: user.id, role: 'user', content: userMsg, mode_used: aiMode },
           { session_id: sessionId, user_id: user.id, role: 'assistant', content: response, mode_used: aiMode, parsed_log: parsed },
         ])
-      } catch (err) {
-        console.error('Failed to save chat messages:', err)
-      }
+      } catch (err) { console.error('Failed to save chat messages:', err) }
     }
   }, [
     messages, sessionId, currentExercise, currentSetNumber, totalSets,
-    flagPain, user, aiMode, painFlags, readiness,
+    flagPain, logSet, nextSet, user, aiMode, painFlags, readiness,
     lastEffortByExercise, consecutiveHardByExercise,
   ])
 
