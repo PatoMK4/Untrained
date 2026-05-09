@@ -38,7 +38,6 @@ export default function ProfilePage() {
   const [signingOut, setSigningOut] = useState(false)
   const [weightInput, setWeightInput] = useState('')
 
-  // Weight history
   const { data: weightHistory, refetch: refetchWeight } = useQuery({
     queryKey: ['weight_history', user?.id],
     queryFn: async () => {
@@ -51,6 +50,7 @@ export default function ProfilePage() {
       return (data ?? []) as { weight: number; unit: string; logged_at: string }[]
     },
     enabled: !!user,
+    staleTime: 0,
   })
 
   const showToast = (msg: string) => {
@@ -64,7 +64,7 @@ export default function ProfilePage() {
     try {
       const { error } = await supabase.from('user_profile').update(updates).eq('user_id', user.id)
       if (error) throw error
-      queryClient.invalidateQueries({ queryKey: ['user_profile', user.id] })
+      await queryClient.refetchQueries({ queryKey: ['user_profile', user.id] })
       setEditField(null)
       showToast('Program updated. Next session reflects your changes.')
     } catch { showToast('Something went wrong. Try again.') }
@@ -77,9 +77,10 @@ export default function ProfilePage() {
     try {
       const { error } = await supabase.from('user_settings').upsert({ user_id: user.id, ...updates })
       if (error) throw error
-      queryClient.invalidateQueries({ queryKey: ['user_settings', user.id] })
+      // Refetch immediately so toggle highlights update without delay
+      await queryClient.refetchQueries({ queryKey: ['user_settings', user.id] })
       showToast('Setting saved.')
-    } catch { /* ignore */ }
+    } catch { showToast('Could not save setting.') }
     finally { setSaving(false) }
   }
 
@@ -133,7 +134,6 @@ export default function ProfilePage() {
     <div className="flex flex-col gap-6 pt-6 pb-8">
       <Wordmark />
 
-      {/* Toast */}
       <AnimatePresence>
         {toast && (
           <motion.div
@@ -145,7 +145,7 @@ export default function ProfilePage() {
         )}
       </AnimatePresence>
 
-      {/* Identity + level */}
+      {/* Identity */}
       <div className="bg-surface rounded-card p-5 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div>
@@ -175,18 +175,15 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Weight log */}
+      {/* Body weight */}
       <div className="flex flex-col gap-2">
         <p className="text-text-disabled text-xs tracking-widest px-1">BODY WEIGHT</p>
-        <button
-          onClick={() => setEditField('weight')}
+        <button onClick={() => setEditField('weight')}
           className="bg-surface rounded-card p-4 flex items-center justify-between w-full active:brightness-110 transition-all min-h-[56px]"
         >
           <p className="text-text-disabled text-sm">Log today's weight</p>
           <p className="text-text-primary text-sm font-bold">{weightUnit} ›</p>
         </button>
-
-        {/* Weight history */}
         {weightHistory && weightHistory.length > 0 && (
           <div className="bg-surface rounded-card p-4">
             <p className="text-text-disabled text-xs tracking-widest mb-3">RECENT</p>
@@ -200,11 +197,8 @@ export default function ProfilePage() {
                 </div>
               ))}
             </div>
-            {/* Simple visual trend */}
             {weightHistory.length >= 2 && (() => {
-              const latest = weightHistory[0].weight
-              const oldest = weightHistory[weightHistory.length - 1].weight
-              const diff = latest - oldest
+              const diff = weightHistory[0].weight - weightHistory[weightHistory.length - 1].weight
               if (Math.abs(diff) < 0.1) return null
               return (
                 <p className={`text-xs mt-3 font-bold ${diff < 0 ? 'text-success' : 'text-warning'}`}>
@@ -216,7 +210,7 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* Program section */}
+      {/* Program */}
       <div className="flex flex-col gap-2">
         <p className="text-text-disabled text-xs tracking-widest px-1">YOUR PROGRAM</p>
         <EditRow label="Goal" value={GOAL_LABELS[profile?.goal ?? ''] ?? profile?.goal ?? '—'} onTap={() => setEditField('goal')} />
@@ -233,7 +227,7 @@ export default function ProfilePage() {
         <div className="bg-surface rounded-card p-4 flex items-center justify-between">
           <div>
             <p className="text-text-primary font-bold text-sm">AI Mode</p>
-            <p className="text-text-disabled text-xs">Smart uses API · Lite uses scripted responses</p>
+            <p className="text-text-disabled text-xs">Smart uses API · Lite is instant</p>
           </div>
           <div className="flex gap-1 bg-surface-raised rounded-pill p-1">
             {(['smart', 'lite'] as const).map(mode => (
@@ -264,16 +258,13 @@ export default function ProfilePage() {
       </div>
 
       {/* Sign out */}
-      <div className="flex flex-col gap-2">
-        <Button
-          fullWidth loading={signingOut} onClick={handleSignOut}
-          className="!bg-surface !text-text-secondary border border-surface-raised"
-        >
-          SIGN OUT
-        </Button>
-      </div>
+      <Button fullWidth loading={signingOut} onClick={handleSignOut}
+        className="!bg-surface !text-text-secondary border border-surface-raised"
+      >
+        SIGN OUT
+      </Button>
 
-      {/* Edit sheet */}
+      {/* Edit sheet — pb-24 clears the navbar */}
       <AnimatePresence>
         {editField && (
           <>
@@ -285,7 +276,7 @@ export default function ProfilePage() {
             <motion.div
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-surface rounded-t-2xl p-6 z-50 max-h-[80vh] overflow-y-auto"
+              className="fixed bottom-0 left-0 right-0 bg-surface rounded-t-2xl p-6 z-50 max-h-[80vh] overflow-y-auto pb-24"
             >
               {editField === 'weight' ? (
                 <div className="flex flex-col gap-4">
@@ -359,7 +350,6 @@ function EditSheet({
         <h3 className="text-text-primary font-black text-xl">{FIELD_LABELS[field]}</h3>
         <button onClick={onClose} className="text-text-disabled text-2xl leading-none">×</button>
       </div>
-
       {field === 'goal' && (
         <div className="flex flex-col gap-2">
           {(['strength','muscle','endurance','weight_loss','overall'] as const).map(g => (
@@ -369,7 +359,6 @@ function EditSheet({
           ))}
         </div>
       )}
-
       {field === 'training_days' && (
         <div className="grid grid-cols-4 gap-2">
           {[2,3,4,5,6,7].map(d => (
@@ -379,7 +368,6 @@ function EditSheet({
           ))}
         </div>
       )}
-
       {field === 'environment' && (
         <div className="flex flex-col gap-2">
           {(['home','gym','both','outdoors'] as const).map(e => (
@@ -389,7 +377,6 @@ function EditSheet({
           ))}
         </div>
       )}
-
       {field === 'equipment' && (
         <div className="flex flex-col gap-2">
           {(['none','pullup_bar','rings','gym'] as const).map(eq => {
@@ -406,7 +393,6 @@ function EditSheet({
           })}
         </div>
       )}
-
       {field === 'split_preference' && (
         <div className="flex flex-col gap-2">
           {(['full_body','ppl','upper_lower','bro_split'] as const).map(s => (
@@ -416,7 +402,6 @@ function EditSheet({
           ))}
         </div>
       )}
-
       {field === 'limitations' && (
         <textarea
           value={String(value ?? '')}
@@ -425,7 +410,6 @@ function EditSheet({
           className="w-full h-28 bg-surface-raised rounded-card p-4 text-text-primary text-sm border border-surface-raised focus:border-accent outline-none resize-none"
         />
       )}
-
       <Button fullWidth loading={saving} onClick={() => onSave({ [field]: value })}>SAVE</Button>
     </div>
   )
