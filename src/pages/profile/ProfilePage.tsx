@@ -66,7 +66,7 @@ export default function ProfilePage() {
       if (error) throw error
       await queryClient.refetchQueries({ queryKey: ['user_profile', user.id] })
       setEditField(null)
-      showToast('Program updated. Next session reflects your changes.')
+      showToast('Program updated.')
     } catch { showToast('Something went wrong. Try again.') }
     finally { setSaving(false) }
   }
@@ -77,7 +77,6 @@ export default function ProfilePage() {
     try {
       const { error } = await supabase.from('user_settings').upsert({ user_id: user.id, ...updates })
       if (error) throw error
-      // Refetch immediately so toggle highlights update without delay
       await queryClient.refetchQueries({ queryKey: ['user_settings', user.id] })
       showToast('Setting saved.')
     } catch { showToast('Could not save setting.') }
@@ -221,7 +220,7 @@ export default function ProfilePage() {
         <EditRow label="Limitations" value={profile?.limitations || 'None'} onTap={() => setEditField('limitations')} />
       </div>
 
-      {/* App settings */}
+      {/* Settings */}
       <div className="flex flex-col gap-2">
         <p className="text-text-disabled text-xs tracking-widest px-1">APP SETTINGS</p>
         <div className="bg-surface rounded-card p-4 flex items-center justify-between">
@@ -257,14 +256,13 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Sign out */}
       <Button fullWidth loading={signingOut} onClick={handleSignOut}
         className="!bg-surface !text-text-secondary border border-surface-raised"
       >
         SIGN OUT
       </Button>
 
-      {/* Edit sheet — pb-24 clears the navbar */}
+      {/* Edit sheet — pb-24 clears navbar */}
       <AnimatePresence>
         {editField && (
           <>
@@ -286,8 +284,7 @@ export default function ProfilePage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <input
-                      type="number"
-                      value={weightInput}
+                      type="number" value={weightInput}
                       onChange={e => setWeightInput(e.target.value)}
                       placeholder="e.g. 80"
                       className="flex-1 h-14 bg-surface-raised rounded-card px-4 text-text-primary text-2xl font-bold border border-surface-raised focus:border-accent outline-none"
