@@ -219,11 +219,14 @@ export function PostWorkout({ onDone }: Props) {
         <p className="text-success text-sm text-center font-bold">✓ Nothing to flag.</p>
       )}
 
-      {(painResponse !== null || !showPainCheck) && (
+      {(painResponse !== null || !showPainCheck) && reflection !== null && (
         <Button fullWidth size="lg" loading={isDone || saving} onClick={handleDone}>
           DONE
         </Button>
       )}
+      {!reflection && (
+  <p className="text-text-disabled text-xs text-center">Select how the session felt to continue</p>
+)}
     </motion.div>
   )
 }

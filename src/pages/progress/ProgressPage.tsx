@@ -91,7 +91,7 @@ export default function ProgressPage() {
 
   const isLoading = scoreLoading || historyLoading
 
-  if (isLoading) {
+ if (isLoading || (!score && !hasSessions)) {
     return (
       <div className="flex flex-col gap-4 pt-6">
         <Wordmark />

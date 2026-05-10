@@ -231,6 +231,11 @@ export function WorkoutPreview({
             </Button>
           </motion.div>
         )}
+        {!readiness && (
+  <p className="text-text-disabled text-xs text-center animate-pulse">
+    ↑ Select how you're feeling to unlock start
+  </p>
+)}
       </AnimatePresence>
     </motion.div>
   )
