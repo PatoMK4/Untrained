@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme: dark, no action bar, black background -->
+    <style name="Theme.Untrained" parent="android:Theme.Material.NoTitleBar">
+        <item name="android:windowBackground">#050505</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:statusBarColor">#050505</item>
+        <item name="android:navigationBarColor">#050505</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+
+    <!-- Splash / launch screen theme (prevents white flash) -->
+    <style name="Theme.Untrained.Splash" parent="Theme.Untrained">
+        <item name="android:windowBackground">#050505</item>
+        <item name="android:windowSplashScreenBackground">#050505</item>
+    </style>
+
+</resources>
