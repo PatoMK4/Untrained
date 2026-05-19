@@ -4,14 +4,23 @@ interface WordmarkProps {
 
 export function Wordmark({ size = 'md' }: WordmarkProps) {
   const sizes = {
-    sm: 'text-lg',
-    md: 'text-2xl',
-    lg: 'text-3xl',
-    xl: 'text-5xl',
+    sm: '2rem',
+    md: '2.5rem',
+    lg: '3.5rem',
+    xl: '5rem',
   }
   return (
-    <span className={`font-black tracking-widest text-text-primary ${sizes[size]}`}>
-      UNTR<span className="text-accent">A</span>INED
+    <span
+      style={{
+        fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+        fontWeight: 800,
+        fontSize: sizes[size],
+        lineHeight: 1,
+        letterSpacing: '-0.02em',
+        color: '#f4f4f3',
+      }}
+    >
+      UNTRAIN<span style={{ color: '#c8ff00' }}>E</span>D
     </span>
   )
 }

@@ -1,8 +1,6 @@
-// src/pages/today/ActiveSession.tsx
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { SetLogger } from '@/components/workout/SetLogger'
-import { Button } from '@/components/ui/Button'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useLogSet, useRecentLogs, useExercises } from '@/hooks/useWorkout'
 import { calculateRestSeconds } from '@/lib/workoutEngine'
@@ -13,6 +11,13 @@ import { ChatPanel } from '@/components/chat/ChatPanel'
 interface Props { onSessionEnd: () => void }
 
 const KCAL_PER_ACTIVE_SECOND = 8 / 60
+
+const mono: React.CSSProperties = {
+  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+  fontSize: 10,
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
+}
 
 function useElapsedTime(startedAt: string | null, isPaused: boolean, totalPausedMs: number): string {
   const [elapsed, setElapsed] = useState(0)
@@ -29,52 +34,60 @@ function useElapsedTime(startedAt: string | null, isPaused: boolean, totalPaused
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-function CircularTimer({ seconds, total, onDismiss, onComplete }: {
+function RestTimer({ seconds, total, onDismiss, onComplete }: {
   seconds: number; total: number; onDismiss: () => void; onComplete: () => void
 }) {
   const [remaining, setRemaining] = useState(seconds)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
 
   useEffect(() => { setRemaining(seconds) }, [seconds])
-
   useEffect(() => {
-    intervalRef.current = setInterval(() => {
+    const interval = setInterval(() => {
       setRemaining(r => {
-        if (r <= 1) { clearInterval(intervalRef.current!); onCompleteRef.current(); return 0 }
+        if (r <= 1) { clearInterval(interval); onCompleteRef.current(); return 0 }
         return r - 1
       })
     }, 1000)
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+    return () => clearInterval(interval)
   }, [seconds])
 
-  const circumference = 2 * Math.PI * 54
-  const strokeDashoffset = circumference * (1 - remaining / total)
-  const mins = Math.floor(remaining / 60)
-  const secs = remaining % 60
+  const warming = remaining <= 5
+  const mm = Math.floor(remaining / 60)
+  const ss = String(remaining % 60).padStart(2, '0')
+  const barPct = Math.max(0, (remaining / total) * 100)
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="relative w-36 h-36">
-        <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-          <circle cx="60" cy="60" r="54" fill="none" stroke="#242424" strokeWidth="8" />
-          <circle cx="60" cy="60" r="54" fill="none" stroke="#C8FF00" strokeWidth="8"
-            strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
-            style={{ transition: 'stroke-dashoffset 1s linear' }}
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-3xl font-black text-text-primary font-mono">
-            {mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}`}
-          </span>
-          <span className="text-text-disabled text-xs tracking-widest">REST</span>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: '24px 0' }}>
+      <div style={{ ...mono, color: warming ? '#c8ff00' : '#ffb02e' }}>
+        {warming ? '● REST ENDING' : '● REST'}
       </div>
-      <button onClick={onDismiss}
-        className="h-10 px-6 bg-surface-raised rounded-pill text-text-secondary text-xs font-bold tracking-widest">
-        SKIP REST
-      </button>
+      <div
+        className={warming ? 'ut-beat' : ''}
+        style={{
+          fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+          fontWeight: 800, fontSize: 168, lineHeight: 0.9,
+          letterSpacing: '-0.04em',
+          color: warming ? '#c8ff00' : '#f4f4f3',
+          transition: 'color 400ms ease',
+        }}
+      >
+        {mm}:{ss}
+      </div>
+      <div style={{ width: '100%', maxWidth: 300, height: 2, background: '#2e2e2e', position: 'relative' }}>
+        <div style={{
+          position: 'absolute', left: 0, top: 0, height: 2,
+          width: `${barPct}%`,
+          background: warming ? '#c8ff00' : '#ffb02e',
+          transition: 'width 1000ms linear, background 600ms ease',
+        }} />
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onDismiss} style={{
+          padding: '10px 16px', background: 'transparent', border: '1px solid #2e2e2e',
+          ...mono, color: '#c9c9c7', cursor: 'pointer', borderRadius: 2,
+        }}>SKIP →</button>
+      </div>
     </div>
   )
 }
@@ -89,15 +102,11 @@ export function ActiveSession({ onSessionEnd }: Props) {
     pauseSession, resumeSession, addActiveSeconds,
   } = useSessionStore()
 
-  const [showCue, setShowCue] = useState(false)
   const [showSwap, setShowSwap] = useState(false)
-  const [swappedExercises, setSwappedExercises] = useState<Record<number, Exercise>>({})
-
   const logSetMutation = useLogSet()
   const { data: allExercises } = useExercises()
   const elapsedTime = useElapsedTime(startedAt, isPaused, totalPausedMs)
 
-  // Calorie counter — ref-based to avoid stale closure leak
   const showRestTimerRef = useRef(showRestTimer)
   const isPausedRef = useRef(isPaused)
   showRestTimerRef.current = showRestTimer
@@ -109,13 +118,11 @@ export function ActiveSession({ onSessionEnd }: Props) {
       if (!showRestTimerRef.current && !isPausedRef.current) addActiveSeconds(1)
     }, 1000)
     return () => clearInterval(interval)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startedAt])
 
   const estimatedCalories = Math.round(activeExerciseSeconds * KCAL_PER_ACTIVE_SECOND)
-
-  const rawExercise = exercises[currentExerciseIndex]
-  const currentExercise = swappedExercises[currentExerciseIndex] ?? rawExercise
+  const currentExercise = exercises[currentExerciseIndex]
   const nextExerciseItem = exercises[currentExerciseIndex + 1]
   const isLastExercise = currentExerciseIndex === exercises.length - 1
   const isLastSet = currentSetNumber > totalSets
@@ -125,25 +132,27 @@ export function ActiveSession({ onSessionEnd }: Props) {
 
   const dynamicRestSeconds = useMemo(() => {
     if (!currentExercise) return 75
-    const lastEffort = lastEffortByExercise[currentExercise.id] ?? null
-    const consecutiveHard = consecutiveHardByExercise[currentExercise.id] ?? 0
-    return calculateRestSeconds(currentExercise.muscle_group as MovementPattern, lastEffort, consecutiveHard, timeSlot)
+    return calculateRestSeconds(
+      currentExercise.muscle_group as MovementPattern,
+      lastEffortByExercise[currentExercise.id] ?? null,
+      consecutiveHardByExercise[currentExercise.id] ?? 0,
+      timeSlot
+    )
   }, [currentExercise, lastEffortByExercise, consecutiveHardByExercise, timeSlot])
 
-  const consecutiveHard = currentExercise ? (consecutiveHardByExercise[currentExercise.id] ?? 0) : 0
   const currentExerciseLogs = logs.filter(l => l.exerciseId === currentExercise?.id)
 
   const swapCandidates = useMemo(() => {
-    if (!allExercises || !rawExercise) return []
+    if (!allExercises || !currentExercise) return []
     const sessionIds = new Set(exercises.map(e => e.id))
-    return allExercises.filter(e =>
-      e.muscle_group === rawExercise.muscle_group &&
-      e.equipment_required === rawExercise.equipment_required &&
+    return (allExercises as Exercise[]).filter(e =>
+      e.muscle_group === currentExercise.muscle_group &&
+      e.equipment_required === currentExercise.equipment_required &&
       !sessionIds.has(e.id) &&
-      e.progression_level === rawExercise.progression_level &&
+      e.progression_level === currentExercise.progression_level &&
       !e.is_warmup && !e.is_cooldown
     ).slice(0, 4)
-  }, [allExercises, rawExercise, exercises])
+  }, [allExercises, currentExercise, exercises])
 
   const getSectionLabel = () => {
     if (!currentExercise) return ''
@@ -164,19 +173,17 @@ export function ActiveSession({ onSessionEnd }: Props) {
   }
 
   const handleNextExercise = () => {
-    setShowCue(false); setShowSwap(false)
+    setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
   }
 
-  // Rest complete: if last set done advance exercise, else show set logger
   const handleRestComplete = () => {
     if (navigator.vibrate) navigator.vibrate([100, 50, 100])
     if (isLastSet) handleNextExercise()
     else setShowRestTimer(false)
   }
 
-  // Skip rest: same logic
   const handleSkipRest = () => {
     if (isLastSet) handleNextExercise()
     else setShowRestTimer(false)
@@ -197,107 +204,133 @@ export function ActiveSession({ onSessionEnd }: Props) {
   }
 
   const handleSkipExercise = () => {
-    setShowCue(false); setShowSwap(false)
+    setShowSwap(false)
     if (isLastExercise) onSessionEnd()
     else nextExercise()
   }
 
   const handleSwap = (replacement: Exercise) => {
-    setSwappedExercises(prev => ({ ...prev, [currentExerciseIndex]: replacement }))
+    const updated = [...exercises]
+    updated[currentExerciseIndex] = replacement
+    useSessionStore.setState({ exercises: updated })
     setShowSwap(false)
   }
 
   if (!currentExercise) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[70vh] gap-6">
-        <p className="text-text-primary font-black text-2xl">ALL DONE.</p>
-        <Button fullWidth size="lg" onClick={onSessionEnd}>END SESSION →</Button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '70vh', gap: 24 }}>
+        <div style={{ fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif', fontWeight: 800, fontSize: 48, color: '#f4f4f3' }}>ALL DONE.</div>
+        <button onClick={onSessionEnd} style={{
+          width: '100%', height: 58, background: '#c8ff00',
+          fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+          fontWeight: 700, fontSize: 24, letterSpacing: '0.04em', textTransform: 'uppercase',
+          color: '#0a0a0a', border: 'none', borderRadius: 2, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px',
+        }}>
+          END SESSION
+          <svg width="22" height="14" viewBox="0 0 22 14" fill="none"><path d="M0 7h20M14 1l6 6-6 6" stroke="#0a0a0a" strokeWidth="2" /></svg>
+        </button>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col pt-4 pb-40">
+    <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16, paddingBottom: 160 }}>
 
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
-          <div className="h-full bg-accent transition-all duration-500"
-            style={{ width: `${(currentExerciseIndex / exercises.length) * 100}%` }} />
+      {/* Top bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={() => isPaused ? resumeSession() : pauseSession()}
+            style={{ ...mono, color: '#c9c9c7', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16">
+              <rect x="2" y="1" width="4" height="14" fill="#8a8a86" />
+              <rect x="10" y="1" width="4" height="14" fill="#8a8a86" />
+            </svg>
+            {isPaused ? 'RESUME' : 'PAUSE'}
+          </button>
         </div>
-        <span className="text-text-disabled text-xs font-mono">{elapsedTime}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="ut-pulse" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#ff4423' }} />
+          <span className="ut-pulse" style={{ ...mono, color: '#ff4423' }}>REC · {getSectionLabel()}</span>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-accent text-xs font-bold tracking-widest">{getSectionLabel()}</span>
-        <span className="text-text-disabled text-xs">{currentExerciseIndex + 1} / {exercises.length}</span>
+      {/* Progress bars */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+        {exercises.map((_, i) => (
+          <div key={i} style={{ flex: 1, height: 3, background: i <= currentExerciseIndex ? '#c8ff00' : '#2e2e2e' }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 28 }}>
+        <span style={{ ...mono, color: '#c8ff00' }}>
+          LIFT {String(currentExerciseIndex + 1).padStart(2, '0')} / {String(exercises.length).padStart(2, '0')}
+        </span>
+        <span style={{ ...mono, color: '#8a8a86' }}>{elapsedTime} ELAPSED</span>
       </div>
 
+      {/* Exercise name */}
       <AnimatePresence mode="wait">
-        <motion.div key={`${currentExerciseIndex}-${currentExercise.id}`}
+        <motion.div
+          key={`${currentExerciseIndex}-${currentExercise.id}`}
           initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="mb-4"
+          exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}
+          style={{ marginBottom: 20 }}
         >
-          <div className="bg-surface rounded-card p-4">
-            <p className="text-text-disabled text-xs font-bold tracking-widest mb-2">CURRENT EXERCISE</p>
-            <div className="flex items-start justify-between gap-2">
-              <h1 className="text-3xl font-black text-text-primary leading-tight uppercase flex-1">
-                {currentExercise.name}
-              </h1>
-              <div className="flex gap-1 flex-shrink-0 mt-1">
-                <button onClick={() => { setShowCue(v => !v); setShowSwap(false) }}
-                  className="h-8 px-3 bg-surface-raised rounded-pill text-text-disabled text-xs font-bold">
-                  {showCue ? 'HIDE' : 'CUE'}
-                </button>
-                {!currentExercise.is_warmup && !currentExercise.is_cooldown && (
-                  <button onClick={() => { setShowSwap(v => !v); setShowCue(false) }}
-                    className="h-8 px-3 bg-surface-raised rounded-pill text-text-disabled text-xs font-bold">
-                    SWAP
-                  </button>
-                )}
-              </div>
-            </div>
-            {lastSessionReps !== null && !showCue && !showSwap && (
-              <p className="text-text-disabled text-xs mt-1">Last session: {lastSessionReps} reps</p>
-            )}
-            <AnimatePresence>
-              {showCue && currentExercise.cue_card?.length > 0 && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-1">
-                  {currentExercise.cue_card.map((cue, i) => (
-                    <p key={i} className="text-text-secondary text-xs leading-relaxed">• {cue}</p>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <AnimatePresence>
-              {showSwap && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }} className="mt-3 flex flex-col gap-2">
-                  <p className="text-text-disabled text-xs font-bold tracking-widest">SWAP WITH</p>
-                  {swapCandidates.length === 0
-                    ? <p className="text-text-secondary text-sm">No alternatives available.</p>
-                    : swapCandidates.map(ex => (
-                      <button key={ex.id} onClick={() => handleSwap(ex)}
-                        className="h-12 bg-surface-raised rounded-card px-4 text-left text-text-primary text-sm font-bold">
-                        {ex.name}
-                      </button>
-                    ))}
-                  <button onClick={() => setShowSwap(false)} className="text-text-disabled text-xs text-center py-1">Cancel</button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <div style={{ ...mono, color: '#8a8a86', marginBottom: 6 }}>NEXT UP</div>
+          <div style={{
+            fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+            fontWeight: 800, fontSize: 56, lineHeight: 0.92,
+            letterSpacing: '-0.01em', color: '#f4f4f3',
+          }}>
+            {currentExercise.name.toUpperCase()}.
           </div>
+          {lastSessionReps !== null && (
+            <div style={{ ...mono, color: '#8a8a86', marginTop: 8 }}>PREV: {lastSessionReps} REPS</div>
+          )}
+          {!currentExercise.is_warmup && !currentExercise.is_cooldown && (
+            <button
+              onClick={() => setShowSwap(v => !v)}
+              style={{
+                ...mono, color: '#8a8a86', background: 'transparent',
+                border: '1px solid #2e2e2e', padding: '6px 12px',
+                borderRadius: 2, cursor: 'pointer', marginTop: 12,
+              }}
+            >SWAP</button>
+          )}
         </motion.div>
       </AnimatePresence>
 
+      {/* Swap panel */}
+      {showSwap && (
+        <div style={{ marginBottom: 20, padding: 12, border: '1px solid #242424', background: '#131313', borderRadius: 2, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ ...mono, color: '#8a8a86', marginBottom: 4 }}>SWAP WITH</div>
+          {swapCandidates.length === 0
+            ? <span style={{ ...mono, color: '#8a8a86' }}>No alternatives.</span>
+            : swapCandidates.map(ex => (
+              <button key={ex.id} onClick={() => handleSwap(ex)} style={{
+                height: 48, border: '1px solid #2e2e2e', background: '#1a1a1a', borderRadius: 2,
+                fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+                fontSize: 20, fontWeight: 600, color: '#f4f4f3', padding: '0 16px', textAlign: 'left', cursor: 'pointer',
+              }}>{ex.name}</button>
+            ))
+          }
+          <button onClick={() => setShowSwap(false)} style={{ ...mono, color: '#5d5d5a', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'center', padding: '4px 0' }}>CANCEL</button>
+        </div>
+      )}
+
+      {/* Set log chips */}
       {currentExerciseLogs.length > 0 && !showSwap && (
-        <div className="flex gap-2 mb-4 flex-wrap">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {currentExerciseLogs.map((l, i) => (
-            <div key={i} className={`h-8 px-3 rounded-pill flex items-center gap-1 text-xs font-bold ${
-              l.effort === 'easy' ? 'bg-success/20 text-success'
-              : l.effort === 'hard' ? 'bg-warning/20 text-warning'
-              : 'bg-surface text-text-secondary'
-            }`}>
+            <div key={i} style={{
+              height: 28, padding: '0 10px', border: `1px solid ${l.effort === 'easy' ? 'rgba(34,204,102,0.4)' : l.effort === 'hard' ? 'rgba(255,176,46,0.4)' : '#2e2e2e'}`,
+              borderRadius: 2, display: 'flex', alignItems: 'center', gap: 6,
+              fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+              fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: l.effort === 'easy' ? '#22CC66' : l.effort === 'hard' ? '#ffb02e' : '#8a8a86',
+            }}>
               <span>S{l.setNumber}</span>
               {l.reps !== null && <span>· {l.reps}</span>}
               {l.extraWeightKg !== null && l.extraWeightKg > 0 && <span>· {l.extraWeightKg}kg</span>}
@@ -306,43 +339,107 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </div>
       )}
 
-      {consecutiveHard >= 3 && !showRestTimer && !showSwap && (
-        <div className="mb-4 bg-surface rounded-card p-3 border-l-4 border-warning">
-          <p className="text-warning text-xs font-bold">{consecutiveHard} hard sets. Tap SWAP for an easier alternative.</p>
+      {/* Consecutive hard warning */}
+      {(consecutiveHardByExercise[currentExercise.id] ?? 0) >= 3 && !showRestTimer && (
+        <div style={{ marginBottom: 16, padding: '10px 14px', border: '1px solid rgba(255,176,46,0.3)', background: 'rgba(255,176,46,0.05)', borderRadius: 2 }}>
+          <span style={{ ...mono, color: '#ffb02e' }}>
+            {consecutiveHardByExercise[currentExercise.id]} hard sets. Consider SWAP.
+          </span>
         </div>
       )}
 
-      <div className="mb-4">
+      {/* Main area */}
+      <div style={{ marginBottom: 20 }}>
         <AnimatePresence mode="wait">
           {isPaused ? (
             <motion.div key="paused" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex flex-col items-center gap-4 py-8">
-              <p className="text-5xl">⏸</p>
-              <p className="text-text-secondary font-bold text-lg">PAUSED</p>
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '48px 0' }}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ width: 6, height: 20, background: '#c9c9c7' }} />
+                <div style={{ width: 6, height: 20, background: '#c9c9c7' }} />
+              </div>
+              <div style={{ ...mono, color: '#c9c9c7' }}>PAUSED</div>
             </motion.div>
           ) : showRestTimer ? (
-            <motion.div key="rest" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
-              className="flex flex-col items-center gap-6 py-4">
-              <CircularTimer
+            <motion.div key="rest" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <RestTimer
                 seconds={dynamicRestSeconds} total={dynamicRestSeconds}
                 onDismiss={handleSkipRest} onComplete={handleRestComplete}
               />
-              {/* UP NEXT — only shown during rest */}
               {nextExerciseItem && (
-                <div className="w-full bg-surface rounded-card p-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <p className="text-text-disabled text-xs font-bold tracking-widest">UP NEXT</p>
-                    <p className="text-text-primary font-bold text-sm">{nextExerciseItem.name}</p>
+                <div style={{ marginTop: 16, padding: '14px 16px', border: '1px solid #242424', background: '#131313', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ ...mono, color: '#c8ff00', marginBottom: 4 }}>UP NEXT</div>
+                    <div style={{ fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif', fontWeight: 600, fontSize: 24, color: '#f4f4f3' }}>
+                      {nextExerciseItem.name.toUpperCase()}
+                    </div>
                   </div>
-                  <span className="text-text-disabled text-lg">›</span>
+                  <span style={{ color: '#8a8a86' }}>›</span>
                 </div>
               )}
+              {currentExerciseLogs.length > 0 && (() => {
+                const last = currentExerciseLogs[currentExerciseLogs.length - 1]
+                return (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ ...mono, color: '#8a8a86', marginBottom: 8 }}>
+                      LAST SET · {currentExerciseLogs.length} OF {totalSets} — LOGGED
+                    </div>
+                    <div style={{ display: 'flex', border: '1px solid #242424', borderRadius: 2 }}>
+                      {[
+                        ['REPS', last.reps !== null ? String(last.reps) : '—', ''],
+                        ['LOAD', last.extraWeightKg && last.extraWeightKg > 0 ? String(last.extraWeightKg) : 'BW', last.extraWeightKg ? 'KG' : ''],
+                        ['EFFORT', last.effort ? last.effort.toUpperCase() : '—', ''],
+                      ].map(([k, v, u], i, a) => (
+                        <div key={k} style={{ flex: 1, padding: '12px 10px', borderRight: i < a.length - 1 ? '1px solid #242424' : 'none' }}>
+                          <div style={{ ...mono, fontSize: 9, color: '#8a8a86' }}>{k}</div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 4 }}>
+                            <span style={{ fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif', fontSize: 24, fontWeight: 700, color: '#c8ff00' }}>{v}</span>
+                            {u && <span style={{ ...mono, fontSize: 9, color: '#8a8a86' }}>{u}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
             </motion.div>
           ) : !showSwap ? (
             <motion.div key={`set-${currentExerciseIndex}-${currentSetNumber}`}
-              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              {/* Set plan grid */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ ...mono, color: '#8a8a86', marginBottom: 8 }}>SET PLAN</div>
+                <div style={{ border: '1px solid #242424', borderRadius: 2, display: 'grid', gridTemplateColumns: '40px 1fr 1fr 80px' }}>
+                  {['SET', 'TARGET', 'LOAD', 'PREV'].map(h => (
+                    <div key={h} style={{ padding: '10px 12px', borderBottom: '1px solid #242424' }}>
+                      <div style={{ ...mono, fontSize: 9 }}>{h}</div>
+                    </div>
+                  ))}
+                  {Array.from({ length: totalSets }).map((_, i) => {
+                    const setNum = i + 1
+                    const done = setNum < currentSetNumber
+                    const active = setNum === currentSetNumber
+                    const log = currentExerciseLogs.find(l => l.setNumber === setNum)
+                    const isLast = i === totalSets - 1
+                    const border = isLast ? 'none' : '1px solid #242424'
+                    return [
+                      <div key={`n${i}`} style={{ padding: '12px', borderBottom: border, borderRight: '1px solid #242424', fontFamily: '"JetBrains Mono",ui-monospace,monospace', fontSize: 12, color: active ? '#c8ff00' : '#8a8a86' }}>
+                        {String(setNum).padStart(2, '0')}
+                      </div>,
+                      <div key={`t${i}`} style={{ padding: '12px', borderBottom: border, borderRight: '1px solid #242424', fontFamily: '"Barlow Condensed","Arial Narrow",sans-serif', fontSize: 18, fontWeight: 600, color: done ? '#c8ff00' : active ? '#f4f4f3' : '#5d5d5a' }}>
+                        {currentExercise.target_reps_min}–{currentExercise.target_reps_max}
+                      </div>,
+                      <div key={`l${i}`} style={{ padding: '12px', borderBottom: border, borderRight: '1px solid #242424', fontFamily: '"Barlow Condensed","Arial Narrow",sans-serif', fontSize: 18, fontWeight: 600, color: '#c8ff00' }}>
+                        {log?.extraWeightKg ? `${log.extraWeightKg} KG` : 'BW'}
+                      </div>,
+                      <div key={`p${i}`} style={{ padding: '12px', borderBottom: border, fontFamily: '"JetBrains Mono",ui-monospace,monospace', fontSize: 11, color: '#8a8a86', letterSpacing: '0.06em' }}>
+                        {log ? `${log.reps ?? '—'}` : lastSessionReps ? `${lastSessionReps}` : '—'}
+                      </div>,
+                    ]
+                  })}
+                </div>
+              </div>
               <SetLogger
                 setNumber={currentSetNumber} totalSets={totalSets}
                 targetRepsMin={currentExercise.target_reps_min}
@@ -355,34 +452,24 @@ export function ActiveSession({ onSessionEnd }: Props) {
         </AnimatePresence>
       </div>
 
-      <div className="flex items-center justify-between px-1 mb-4">
-        <div className="text-center">
-          <p className="text-text-primary font-black text-lg">~{estimatedCalories}</p>
-          <p className="text-text-disabled text-xs">KCAL</p>
-        </div>
-        <div className="text-center">
-          <p className="text-text-primary font-black text-lg">{elapsedTime}</p>
-          <p className="text-text-disabled text-xs">TIME</p>
-        </div>
-        <div className="text-center">
-          <p className="text-text-primary font-black text-lg">{currentExerciseLogs.length}/{totalSets}</p>
-          <p className="text-text-disabled text-xs">SETS</p>
-        </div>
+      {/* Stats row */}
+      <div style={{ display: 'flex', border: '1px solid #242424', borderRadius: 2, marginBottom: 20 }}>
+        {[['KCAL', `~${estimatedCalories}`], ['TIME', elapsedTime], ['SETS', `${currentExerciseLogs.length}/${totalSets}`]].map(([k, v], i, a) => (
+          <div key={k} style={{ flex: 1, padding: '12px', borderRight: i < a.length - 1 ? '1px solid #242424' : 'none' }}>
+            <div style={{ ...mono, fontSize: 9, color: '#8a8a86' }}>{k}</div>
+            <div style={{ fontFamily: '"Barlow Condensed","Arial Narrow",sans-serif', fontSize: 22, fontWeight: 700, color: '#f4f4f3', marginTop: 4 }}>{v}</div>
+          </div>
+        ))}
       </div>
 
-      <div className="flex gap-2 mb-2">
-        <button onClick={handleBack}
-          className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all">
-          ◀ UNDO
-        </button>
-        <button onClick={() => isPaused ? resumeSession() : pauseSession()}
-          className="flex-1 h-12 bg-accent rounded-card text-navbar text-xs font-black tracking-widest active:brightness-110 transition-all">
-          {isPaused ? '▶ RESUME' : '⏸ PAUSE'}
-        </button>
-        <button onClick={handleSkipExercise}
-          className="flex-1 h-12 bg-surface rounded-card text-text-secondary text-xs font-bold tracking-widest active:brightness-110 transition-all">
-          SKIP ▶
-        </button>
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {[['UNDO', handleBack], ['SKIP', handleSkipExercise]].map(([label, handler]) => (
+          <button key={label as string} onClick={handler as () => void} style={{
+            flex: 1, height: 48, background: '#131313', border: '1px solid #242424',
+            ...mono, color: '#c9c9c7', cursor: 'pointer', borderRadius: 2,
+          }}>{label as string}</button>
+        ))}
       </div>
 
       <ChatPanel sessionId={sessionId} />

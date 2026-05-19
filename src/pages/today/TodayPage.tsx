@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Wordmark } from '@/components/ui/Wordmark'
 import { WorkoutPreview } from './WorkoutPreview'
 import { ActiveSession } from './ActiveSession'
 import { PostWorkout } from './PostWorkout'
@@ -28,6 +27,13 @@ interface RecapRow {
   readiness_score: string | null
   post_reflection: string | null
   completed_at: string | null
+}
+
+const mono: React.CSSProperties = {
+  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+  fontSize: 10,
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
 }
 
 export default function TodayPage() {
@@ -78,18 +84,14 @@ export default function TodayPage() {
 
   const isComeback = useMemo(() => {
     if (!lastSessionData?.date) return false
-    const daysDiff = (Date.now() - new Date(lastSessionData.date as string).getTime()) / 86400000
-    return daysDiff >= 4
+    return (Date.now() - new Date(lastSessionData.date as string).getTime()) / 86400000 >= 4
   }, [lastSessionData])
 
   const painFollowUp = useMemo(() => {
     if (!lastSessionData) return null
     const rec = lastSessionData as Record<string, unknown>
     if (!rec.pain_flagged) return null
-    const note = typeof rec.pain_note === 'string' && rec.pain_note
-      ? rec.pain_note
-      : 'the discomfort you mentioned'
-    return { note }
+    return { note: typeof rec.pain_note === 'string' && rec.pain_note ? rec.pain_note : 'the discomfort you mentioned' }
   }, [lastSessionData])
 
   const splitPreference: SplitPreference = (profile?.split_preference as SplitPreference) ?? 'full_body'
@@ -107,10 +109,7 @@ export default function TodayPage() {
 
   const sessionType: SessionType = useMemo(() => {
     if (!profile) return 'full_body'
-    return getSessionType(
-      profile.training_days, splitPreference,
-      profile.created_at, completedSessionCount ?? 0
-    )
+    return getSessionType(profile.training_days, splitPreference, profile.created_at, completedSessionCount ?? 0)
   }, [profile, splitPreference, completedSessionCount])
 
   const isRestDay = sessionType === 'rest' || sessionType === 'active_recovery'
@@ -119,47 +118,32 @@ export default function TodayPage() {
     if (!exercises || !profile || isRestDay) {
       return {
         warmup: [] as Exercise[], main: [] as Exercise[], cooldown: [] as Exercise[],
-        config: {
-          warmupCount: 3, cooldownCount: 3, setsPerExercise: 3,
-          baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null,
-        },
+        config: { warmupCount: 3, cooldownCount: 3, setsPerExercise: 3, baseRestSeconds: 75, mainCount: 4, totalMinutes: 45 as number | null },
       }
     }
     const effectiveReadiness: Readiness | null = isComeback && !readiness ? 'tired' : readiness
-    return buildWorkout(
-      sessionType, timeSlot, effectiveProgressionMap,
-      profile.equipment ?? [], exercises as Exercise[], effectiveReadiness
-    )
+    return buildWorkout(sessionType, timeSlot, effectiveProgressionMap, profile.equipment ?? [], exercises as Exercise[], effectiveReadiness)
   }, [exercises, effectiveProgressionMap, profile, sessionType, timeSlot, isRestDay, readiness, isComeback])
 
-  const allExercises = useMemo(
-    () => [...workout.warmup, ...workout.main, ...workout.cooldown],
-    [workout]
-  )
+  const allExercises = useMemo(() => [...workout.warmup, ...workout.main, ...workout.cooldown], [workout])
 
   useEffect(() => {
-    if (sessionJustCompleted) return
-    if (view === 'done') return
-    if (todaySessionCompleted && view !== 'post') {
-      setView('done')
-    } else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') {
-      setView('active')
-    } else if (isRestDay && view === 'preview') {
-      setView('recovery')
-    }
+    if (sessionJustCompleted || view === 'done') return
+    if (todaySessionCompleted && view !== 'post') setView('done')
+    else if (todaySession?.status === 'in_progress' && isActive && view !== 'active') setView('active')
+    else if (isRestDay && view === 'preview') setView('recovery')
   }, [todaySession, todaySessionCompleted, isActive, isRestDay, sessionJustCompleted, view])
 
   const isLoading = loadingEx || loadingProg || loadingProfile || completedSessionCount === undefined
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-4 pt-6">
-        <Wordmark />
-        <div className="flex flex-col gap-3 mt-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />
-          ))}
-        </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 64 }}>
+        <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#c8ff00' }} className="ut-pulse" />
+        <div style={{ height: 64, width: 200, background: '#131313', borderRadius: 2 }} />
+        <div style={{ height: 12, width: 140, background: '#131313', borderRadius: 2, marginTop: 4 }} />
+        <div style={{ height: 160, background: '#131313', borderRadius: 2, marginTop: 16 }} />
+        <div style={{ height: 220, background: '#131313', borderRadius: 2 }} />
       </div>
     )
   }
@@ -170,26 +154,16 @@ export default function TodayPage() {
     const dbTime: 30 | 45 | 60 = timeSlot === 'no_rush' ? 60 : timeSlot
     try {
       const session = await createSession.mutateAsync({ session_type: sessionType, time_available: dbTime })
-      try {
-        await supabase
-          .from('workout_sessions')
-          .update({ readiness_score: selectedReadiness })
-          .eq('id', session.id)
-      } catch { /* column may not exist yet */ }
+      try { await supabase.from('workout_sessions').update({ readiness_score: selectedReadiness }).eq('id', session.id) } catch { /* ok */ }
       sessionStorage.setItem('session_readiness', selectedReadiness)
       startSession(session.id, allExercises, timeSlot, workout.config.setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create session:', err) }
   }
 
-  const handleStartRecoverySession = async (
-    recoveryExercises: Exercise[],
-    setsPerExercise: number
-  ) => {
+  const handleStartRecoverySession = async (recoveryExercises: Exercise[], setsPerExercise: number) => {
     try {
-      const session = await createSession.mutateAsync({
-        session_type: 'active_recovery', time_available: 30,
-      })
+      const session = await createSession.mutateAsync({ session_type: 'active_recovery', time_available: 30 })
       startSession(session.id, recoveryExercises, 30, setsPerExercise)
       setView('active')
     } catch (err) { console.error('Failed to create recovery session:', err) }
@@ -218,7 +192,7 @@ export default function TodayPage() {
         checkin_response: response, logged_at: new Date().toISOString(),
       })
       queryClient.invalidateQueries({ queryKey: ['last_session', user.id] })
-    } catch { /* pain_logs may not exist yet */ }
+    } catch { /* ok */ }
   }
 
   const handleSessionEnd = () => { setSessionJustCompleted(true); setView('post') }
@@ -235,84 +209,81 @@ export default function TodayPage() {
     setView('done')
   }
 
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'GOOD MORNING.' : hour < 17 ? 'GOOD AFTERNOON.' : 'GOOD EVENING.'
+  const dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+  const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+  const now = new Date()
+  const dayLabel = dayNames[now.getDay()]
+  const dateStr = `${monthNames[now.getMonth()]} ${now.getDate()}`
 
   return (
-    <div className="flex flex-col pt-6">
+    <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 64 }}>
       <AnimatePresence mode="wait">
 
         {view === 'done' && (
-          <motion.div
-            key="done"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col gap-6"
-          >
-            <Wordmark />
-            <div>
-              <h1 className="text-4xl font-black text-text-primary">DONE FOR TODAY.</h1>
-              <p className="text-text-secondary text-sm mt-1">Rest. Recover. Come back stronger.</p>
-            </div>
+          <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <TopMeta dayLabel={dayLabel} dateStr={dateStr} />
+            <div style={{
+              fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+              fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase',
+              color: '#c8ff00', marginBottom: 8,
+            }}>● COMPLETE</div>
+            <div style={{
+              fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+              fontWeight: 800, fontSize: 110, lineHeight: 0.85,
+              letterSpacing: '-0.025em', color: '#f4f4f3',
+            }}>DONE.</div>
 
             {todayRecap && (
-              <div className="bg-surface rounded-card p-5 flex flex-col gap-4">
-                <p className="text-text-disabled text-xs tracking-widest">TODAY'S SESSION</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <p className="text-text-disabled text-xs">SETS</p>
-                    <p className="text-text-primary font-black text-2xl">{todayRecap.total_sets}</p>
-                  </div>
-                  <div>
-                    <p className="text-text-disabled text-xs">REPS</p>
-                    <p className="text-text-primary font-black text-2xl">{todayRecap.total_reps}</p>
-                  </div>
-                  <div>
-                    <p className="text-text-disabled text-xs">SCORE</p>
-                    <p className="text-accent font-black text-2xl">+{todayRecap.score_awarded}</p>
-                  </div>
+              <>
+                <div style={{ marginTop: 32, display: 'flex', borderTop: '1px solid #242424', borderBottom: '1px solid #242424' }}>
+                  {[
+                    ['TIME', `${Math.floor((todayRecap.total_sets || 0) * 2.5)}:00`, 'MIN'],
+                    ['VOL', String(todayRecap.total_sets), 'SETS'],
+                    ['SCORE', `+${todayRecap.score_awarded}`, 'PTS'],
+                  ].map(([k, v, u], i, a) => (
+                    <div key={k} style={{ flex: 1, padding: '20px 16px', borderRight: i < a.length - 1 ? '1px solid #242424' : 'none' }}>
+                      <div style={{ ...mono, color: '#8a8a86' }}>{k}</div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 8 }}>
+                        <span style={{
+                          fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+                          fontWeight: 700, fontSize: 34,
+                          color: k === 'SCORE' ? '#c8ff00' : '#f4f4f3',
+                          letterSpacing: '-0.01em',
+                        }}>{v}</span>
+                        <span style={{ ...mono, color: '#8a8a86' }}>{u}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                {todayRecap.readiness_score && (
-                  <p className="text-text-secondary text-sm">
-                    Came in feeling{' '}
-                    <span className="text-text-primary font-bold capitalize">
-                      {todayRecap.readiness_score}
-                    </span>
-                  </p>
-                )}
                 {todayRecap.post_reflection && (
-                  <p className="text-text-secondary text-sm">
-                    Rated it{' '}
-                    <span className="text-text-primary font-bold capitalize">
-                      {todayRecap.post_reflection.replace(/_/g, ' ')}
-                    </span>
-                  </p>
+                  <div style={{ marginTop: 24 }}>
+                    <div style={{ ...mono, color: '#8a8a86', marginBottom: 6 }}>FEELING</div>
+                    <div style={{
+                      fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+                      fontWeight: 600, fontSize: 28, color: '#f4f4f3', letterSpacing: '0.01em',
+                    }}>{todayRecap.post_reflection.replace(/_/g, ' ').toUpperCase()}</div>
+                  </div>
                 )}
-              </div>
+              </>
             )}
 
-            <p className="text-text-disabled text-xs text-center">See you next session.</p>
+            <div style={{ ...mono, color: '#5d5d5a', marginTop: 40 }}>See you next session.</div>
           </motion.div>
         )}
 
         {view === 'recovery' && (
           <motion.div key="recovery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Wordmark />
-            <h1 className="text-4xl font-black mt-2 mb-4">{greeting}</h1>
+            <TopMeta dayLabel={dayLabel} dateStr={dateStr} />
             <RecoveryDay onStartSession={handleStartRecoverySession} onFullRest={handleFullRest} />
           </motion.div>
         )}
 
         {view === 'preview' && (
           <motion.div key="preview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Wordmark />
-            <h1 className="text-4xl font-black mt-2 mb-4">{greeting}</h1>
+            <TopMeta dayLabel={dayLabel} dateStr={dateStr} />
             {allExercises.length === 0 ? (
-              <div className="bg-surface rounded-card p-5">
-                <p className="text-text-secondary">
-                  No exercises found. Check Supabase exercise library.
-                </p>
+              <div style={{ padding: 16, border: '1px solid #242424', background: '#131313', borderRadius: 2, marginTop: 16 }}>
+                <span style={{ ...mono, color: '#8a8a86' }}>No exercises found. Check Supabase exercise library.</span>
               </div>
             ) : (
               <WorkoutPreview
@@ -340,6 +311,20 @@ export default function TodayPage() {
         )}
 
       </AnimatePresence>
+    </div>
+  )
+}
+
+function TopMeta({ dayLabel, dateStr }: { dayLabel: string; dateStr: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#c8ff00' }} />
+        <span style={{
+          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+          fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#c9c9c7',
+        }}>{dayLabel} · {dateStr}</span>
+      </div>
     </div>
   )
 }

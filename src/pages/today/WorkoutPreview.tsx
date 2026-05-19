@@ -24,46 +24,56 @@ interface Props {
   onPainFollowUp?: (response: 'better' | 'same' | 'worse') => void
 }
 
-function ExerciseRow({ exercise }: { exercise: Exercise }) {
+const mono: React.CSSProperties = {
+  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+  fontSize: 10,
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
+}
+
+function ExerciseRow({ exercise, index }: { exercise: Exercise; index: number }) {
   const [expanded, setExpanded] = useState(false)
+  const num = String(index + 1).padStart(2, '0')
+  const repsLabel = exercise.target_duration_seconds
+    ? `${exercise.target_duration_seconds}s`
+    : exercise.target_reps_min && exercise.target_reps_max
+    ? `${exercise.target_reps_min}–${exercise.target_reps_max} reps`
+    : ''
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between py-2">
-        <div className="flex-1">
-          <p className="text-text-primary font-bold text-base">{exercise.name}</p>
-          <p className="text-text-secondary text-xs mt-0.5">
-            {exercise.target_duration_seconds
-              ? `${exercise.target_duration_seconds}s`
-              : exercise.target_reps_min && exercise.target_reps_max
-              ? `${exercise.target_reps_min}–${exercise.target_reps_max} reps`
-              : ''}
-          </p>
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #242424' }}>
+        <span style={{ ...mono, color: '#8a8a86', width: 18 }}>{num}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{
+            fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+            fontWeight: 600, fontSize: 22, color: '#f4f4f3', letterSpacing: '0.01em',
+          }}>{exercise.name}</div>
+          <div style={{ ...mono, color: '#8a8a86', marginTop: 2 }}>{repsLabel}</div>
         </div>
         <button
-          onClick={() => setExpanded((v) => !v)}
-          className="text-text-disabled text-xs font-bold tracking-widest bg-surface-raised px-2 py-1 rounded-pill ml-2"
+          onClick={() => setExpanded(v => !v)}
+          style={{
+            ...mono, color: '#8a8a86', background: 'transparent',
+            border: '1px solid #2e2e2e', padding: '6px 10px',
+            borderRadius: 2, cursor: 'pointer', minHeight: 32,
+          }}
         >
-          {expanded ? 'HIDE' : 'TECHNIQUE'}
+          {expanded ? 'HIDE' : 'TECH'}
         </button>
       </div>
-      {expanded && <CueCard exercise={exercise} />}
+      {expanded && <div style={{ paddingBottom: 12 }}><CueCard exercise={exercise} /></div>}
     </div>
   )
 }
 
-function estimateMinutes(
-  warmupCount: number, mainCount: number, cooldownCount: number,
-  sets: number, restSeconds: number
-): number {
-  return Math.round(
-    (warmupCount * 60 + cooldownCount * 60 + mainCount * (sets * 45 + (sets - 1) * restSeconds + 30)) / 60
-  )
+function estimateMinutes(warmupCount: number, mainCount: number, cooldownCount: number, sets: number, restSeconds: number): number {
+  return Math.round((warmupCount * 60 + cooldownCount * 60 + mainCount * (sets * 45 + (sets - 1) * restSeconds + 30)) / 60)
 }
 
 const READINESS_OPTIONS: { value: Readiness; label: string; sub: string }[] = [
-  { value: 'great', label: 'FEELING GREAT', sub: 'Ready to push' },
-  { value: 'good',  label: 'FEELING GOOD',  sub: 'Normal session' },
-  { value: 'tired', label: 'A BIT TIRED',   sub: 'Keep it manageable' },
+  { value: 'great', label: 'READY TO PUSH',  sub: 'All good' },
+  { value: 'good',  label: 'FEELING GOOD',   sub: 'Normal session' },
+  { value: 'tired', label: 'A BIT TIRED',    sub: 'Keep it manageable' },
 ]
 
 export function WorkoutPreview({
@@ -76,91 +86,82 @@ export function WorkoutPreview({
   const [readiness, setReadiness] = useState<Readiness | null>(null)
   const [painAnswered, setPainAnswered] = useState(false)
 
-  const toggle = (key: string) => setExpandedSections((s) => ({ ...s, [key]: !s[key] }))
+  const toggle = (key: string) => setExpandedSections(s => ({ ...s, [key]: !s[key] }))
 
-  const estimatedMins = estimateMinutes(
-    warmup.length, main.length, cooldown.length,
-    config.setsPerExercise, config.baseRestSeconds
-  )
+  const estimatedMins = estimateMinutes(warmup.length, main.length, cooldown.length, config.setsPerExercise, config.baseRestSeconds)
+  const totalExercises = warmup.length + main.length + cooldown.length
 
   const handlePainResponse = (response: 'better' | 'same' | 'worse') => {
     onPainFollowUp?.(response)
     setPainAnswered(true)
   }
 
-  const SectionHeader = ({ label, count, sectionKey }: { label: string; count: number; sectionKey: string }) => (
-    <button onClick={() => toggle(sectionKey)} className="flex items-center justify-between w-full py-3">
-      <div className="flex items-center gap-2">
-        <span className="text-text-secondary text-xs font-bold tracking-widest">{label}</span>
-        <span className="text-text-disabled text-xs">({count})</span>
-      </div>
-      <span className="text-text-disabled text-sm">{expandedSections[sectionKey] ? '▲' : '▼'}</span>
-    </button>
-  )
+  const sessionLabel = sessionTypeLabel(sessionType).toUpperCase()
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="flex flex-col gap-4 pb-8"
+      transition={{ duration: 0.2 }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 32, paddingBottom: 40 }}
     >
-      {/* Comeback card */}
+      {/* Comeback */}
       {isComeback && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-surface rounded-card p-4 border-l-4 border-accent"
-        >
-          <p className="text-accent text-xs font-bold tracking-widest mb-1">WELCOME BACK</p>
-          <p className="text-text-primary font-bold">It's been a few days. No stress.</p>
-          <p className="text-text-secondary text-sm mt-1">
-            Today's session is dialled back — build momentum, not fatigue.
-          </p>
-        </motion.div>
+        <div style={{ padding: '14px 16px', border: '1px solid rgba(200,255,0,0.3)', background: 'rgba(200,255,0,0.04)', borderRadius: 2 }}>
+          <div style={{ ...mono, color: '#c8ff00', marginBottom: 6 }}>WELCOME BACK</div>
+          <div style={{ fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif', fontSize: 20, fontWeight: 600, color: '#f4f4f3' }}>
+            It's been a few days. No stress.
+          </div>
+          <div style={{ ...mono, color: '#8a8a86', marginTop: 4, lineHeight: 1.6 }}>
+            Session dialled back — build momentum, not fatigue.
+          </div>
+        </div>
       )}
 
       {/* Pain follow-up */}
       {painFollowUp && !painAnswered && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-surface rounded-card p-4 border-l-4 border-warning"
-        >
-          <p className="text-warning text-xs font-bold tracking-widest mb-1">CHECKING IN</p>
-          <p className="text-text-primary font-bold mb-1">
-            Last session you flagged: <span className="text-warning">{painFollowUp.note}</span>
-          </p>
-          <p className="text-text-secondary text-sm mb-3">How is it feeling today?</p>
-          <div className="flex gap-2">
-            {(['better', 'same', 'worse'] as const).map((r) => (
+        <div style={{ padding: '14px 16px', border: '1px solid rgba(255,176,46,0.3)', background: 'rgba(255,176,46,0.04)', borderRadius: 2 }}>
+          <div style={{ ...mono, color: '#ffb02e', marginBottom: 6 }}>CHECKING IN</div>
+          <div style={{ fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif', fontSize: 20, fontWeight: 600, color: '#f4f4f3', marginBottom: 8 }}>
+            You flagged: <span style={{ color: '#ffb02e' }}>{painFollowUp.note}</span>
+          </div>
+          <div style={{ ...mono, color: '#8a8a86', marginBottom: 12 }}>How is it today?</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['better', 'same', 'worse'] as const).map(r => (
               <button key={r} onClick={() => handlePainResponse(r)}
-                className="flex-1 h-10 bg-surface-raised rounded-card text-text-primary text-xs font-bold capitalize active:brightness-110 transition-all"
-              >
-                {r}
-              </button>
+                style={{
+                  flex: 1, height: 40, background: 'transparent', border: '1px solid #2e2e2e',
+                  ...mono, color: '#c9c9c7', cursor: 'pointer', borderRadius: 2,
+                }}>{r}</button>
             ))}
           </div>
-        </motion.div>
-      )}
-
-      {painFollowUp && painAnswered && (
-        <div className="bg-surface rounded-card p-3">
-          <p className="text-text-secondary text-sm">✓ Noted — your PT will keep this in mind.</p>
         </div>
+      )}
+      {painFollowUp && painAnswered && (
+        <div style={{ ...mono, color: '#8a8a86' }}>✓ NOTED.</div>
       )}
 
       {/* Session heading */}
       <div>
-        <h1 className="text-4xl font-black text-text-primary leading-tight">
-          {sessionTypeLabel(sessionType)}
-        </h1>
-        <p className="text-text-secondary text-sm mt-1">
-          {warmup.length + main.length + cooldown.length} exercises · {config.setsPerExercise} sets — ~{estimatedMins} min
-        </p>
+        <div style={{ ...mono, color: '#8a8a86', marginBottom: 6 }}>{sessionLabel}</div>
+        <div style={{
+          fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+          fontWeight: 800, fontSize: 86, lineHeight: 0.88,
+          letterSpacing: '-0.02em', color: '#f4f4f3',
+        }}>
+          {sessionLabel.split(' ')[0]}<br />
+          <span style={{ color: '#c9c9c7', fontSize: 48, fontWeight: 500 }}>DAY.</span>
+        </div>
+        <div style={{ ...mono, color: '#8a8a86', marginTop: 14 }}>
+          {estimatedMins} MIN · {totalExercises} LIFTS · {config.setsPerExercise} SETS
+        </div>
       </div>
 
       {/* Time picker */}
-      <div className="bg-surface rounded-card p-4">
-        <p className="text-text-secondary text-xs font-bold tracking-widest mb-3">TIME AVAILABLE</p>
-        <div className="flex gap-2 flex-wrap">
-          {([30, 45, 60, 'no_rush'] as const).map((t) => (
+      <div>
+        <div style={{ ...mono, color: '#8a8a86', marginBottom: 12 }}>TIME AVAILABLE</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {([30, 45, 60, 'no_rush'] as const).map(t => (
             <PillButton
               key={t}
               label={t === 60 ? '60 MIN+' : t === 'no_rush' ? 'NO RUSH' : `${t} MIN`}
@@ -172,71 +173,91 @@ export function WorkoutPreview({
       </div>
 
       {/* Exercise list */}
-      <div className="bg-surface rounded-card p-4 flex flex-col">
-        <div className="border-b border-surface-raised">
-          <SectionHeader label="WARM-UP" count={warmup.length} sectionKey="warmup" />
-          {expandedSections.warmup && (
-            <div className="flex flex-col divide-y divide-surface-raised pb-2">
-              {warmup.map((ex) => <ExerciseRow key={ex.id} exercise={ex} />)}
-            </div>
-          )}
-        </div>
-        <div className="border-b border-surface-raised">
-          <SectionHeader label="MAIN" count={main.length} sectionKey="main" />
-          {expandedSections.main && (
-            <div className="flex flex-col divide-y divide-surface-raised pb-2">
-              {main.map((ex) => <ExerciseRow key={ex.id} exercise={ex} />)}
-            </div>
-          )}
-        </div>
-        <div>
-          <SectionHeader label="COOL-DOWN" count={cooldown.length} sectionKey="cooldown" />
-          {expandedSections.cooldown && (
-            <div className="flex flex-col divide-y divide-surface-raised pb-2">
-              {cooldown.map((ex) => <ExerciseRow key={ex.id} exercise={ex} />)}
-            </div>
-          )}
-        </div>
+      <div>
+        <SectionHeader label="WARM-UP" count={warmup.length} open={expandedSections.warmup} onToggle={() => toggle('warmup')} />
+        {expandedSections.warmup && warmup.map((ex, i) => <ExerciseRow key={ex.id} exercise={ex} index={i} />)}
+
+        <SectionHeader label="MAIN" count={main.length} open={expandedSections.main} onToggle={() => toggle('main')} />
+        {expandedSections.main && main.map((ex, i) => <ExerciseRow key={ex.id} exercise={ex} index={i} />)}
+
+        <SectionHeader label="COOL-DOWN" count={cooldown.length} open={expandedSections.cooldown} onToggle={() => toggle('cooldown')} />
+        {expandedSections.cooldown && cooldown.map((ex, i) => <ExerciseRow key={ex.id} exercise={ex} index={i} />)}
       </div>
 
-      {/* Readiness check */}
-      <div className="bg-surface rounded-card p-4 flex flex-col gap-3">
-        <p className="text-text-secondary text-xs font-bold tracking-widest">HOW ARE YOU FEELING?</p>
-        <div className="flex flex-col gap-2">
-          {READINESS_OPTIONS.map((opt) => (
+      {/* Readiness */}
+      <div>
+        <div style={{ ...mono, color: '#8a8a86', marginBottom: 12 }}>READINESS</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {READINESS_OPTIONS.map(opt => (
             <button
               key={opt.value}
               onClick={() => setReadiness(opt.value)}
-              className={`h-14 rounded-card flex items-center justify-between px-4 transition-all ${
-                readiness === opt.value ? 'bg-accent' : 'bg-surface-raised'
-              }`}
+              style={{
+                width: '100%', height: 56,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '0 16px',
+                border: readiness === opt.value ? '1px solid #c8ff00' : '1px solid #242424',
+                background: readiness === opt.value ? '#c8ff00' : '#131313',
+                borderRadius: 2, cursor: 'pointer', transition: 'all 0.1s',
+              }}
             >
-              <span className={`font-bold text-sm ${readiness === opt.value ? 'text-navbar' : 'text-text-primary'}`}>
-                {opt.label}
-              </span>
-              <span className={`text-xs ${readiness === opt.value ? 'text-navbar' : 'text-text-disabled'}`}>
-                {opt.sub}
-              </span>
+              <span style={{
+                fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+                fontWeight: 700, fontSize: 22, letterSpacing: '0.04em',
+                color: readiness === opt.value ? '#0a0a0a' : '#f4f4f3',
+              }}>{opt.label}</span>
+              <span style={{
+                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
+                color: readiness === opt.value ? 'rgba(10,10,10,0.6)' : '#8a8a86',
+              }}>{opt.sub}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Start button — only after readiness selected */}
+      {/* CTA */}
       <AnimatePresence>
-        {readiness && (
+        {readiness ? (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <Button fullWidth size="lg" loading={isStarting} onClick={() => onStart(readiness)}>
-              START SESSION →
+            <Button fullWidth size="lg" loading={isStarting} onClick={() => onStart(readiness)} sub="SESSION">
+              BEGIN
             </Button>
           </motion.div>
+        ) : (
+          <div style={{ ...mono, color: '#5d5d5a', textAlign: 'center' }}>
+            Select readiness to unlock
+          </div>
         )}
-        {!readiness && (
-  <p className="text-text-disabled text-xs text-center animate-pulse">
-    ↑ Select how you're feeling to unlock start
-  </p>
-)}
       </AnimatePresence>
     </motion.div>
+  )
+}
+
+function SectionHeader({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        width: '100%', padding: '14px 0', minHeight: 44,
+        background: 'transparent', border: 'none', borderTop: '1px solid #242424',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+          fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#8a8a86',
+        }}>{label}</span>
+        <span style={{
+          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+          fontSize: 10, color: '#5d5d5a',
+        }}>({count})</span>
+      </div>
+      <span style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace', fontSize: 10, color: '#5d5d5a' }}>
+        {open ? '▲' : '▼'}
+      </span>
+    </button>
   )
 }
