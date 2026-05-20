@@ -82,7 +82,7 @@ export default function ProgramPage() {
                 }}>{p.v}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={tag(p.active ? C.lime : C.mute2)}>{p.wks}</div>
+                <div style={tag(p.active ? C.lime : C.mute)}>{p.wks}</div>
                 {p.active && (
                   <div style={{
                     marginTop: 6, width: 60, height: 2, background: C.line2, position: 'relative',

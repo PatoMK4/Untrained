@@ -199,7 +199,7 @@ export function WorkoutPreview({
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontFamily: F.mono, fontSize: 13, color: C.lime, fontWeight: 500, letterSpacing: '0.04em' }}>
-                    {ex.target_weight_kg ? `${Math.round(ex.target_weight_kg * 2.20462)} LB` : '—'}
+                    —
                   </div>
                 </div>
               </div>

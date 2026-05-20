@@ -172,7 +172,7 @@ export default function ProfilePage() {
             ['EXPORT MY DATA', ''],
             ['INTEGRATIONS', 'APPLE HEALTH · STRAVA'],
             ['SUBSCRIPTION', 'PRO · $12/MO'],
-          ].map(([k, v], i) => (
+          ].map(([k, v]) => (
             <div key={k} style={{
               padding: '14px 0', borderBottom: '1px solid ' + C.line,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
