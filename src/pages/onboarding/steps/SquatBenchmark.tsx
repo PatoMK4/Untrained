@@ -79,7 +79,6 @@ export function SquatBenchmark({ onNext }: StepProps) {
                 label={e.value.toUpperCase()}
                 selected={effort === e.value}
                 onClick={() => setEffort(e.value)}
-                color={e.color}
               />
             ))}
           </div>

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
-import { Wordmark } from '@/components/ui/Wordmark'
 import { Button } from '@/components/ui/Button'
 
 type AuthMode = 'signin' | 'signup'

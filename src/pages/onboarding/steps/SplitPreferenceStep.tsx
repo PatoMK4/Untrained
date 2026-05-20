@@ -114,7 +114,7 @@ export function SplitPreferenceStep({ onNext, onBack, data }: StepProps) {
 
       <div className="flex gap-3 mt-6">
         {onBack && (
-          <Button variant="secondary" onClick={onBack} className="w-24">
+          <Button variant="ghost" onClick={onBack} className="w-24">
             ← BACK
           </Button>
         )}

@@ -31,7 +31,7 @@ export function ProfilePlaceholder() {
       </Card>
 
       <div className="mt-4">
-        <Button variant="secondary" fullWidth onClick={() => void signOut()}>
+        <Button variant="ghost" fullWidth onClick={() => void signOut()}>
           SIGN OUT
         </Button>
       </div>
