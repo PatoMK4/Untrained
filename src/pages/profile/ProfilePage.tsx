@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useUserProfile } from '@/hooks/useWorkout'
-import { useScore } from '@/hooks/useScore'
+import { useScore, useUserSettings, useWeightHistory } from '@/hooks/useScore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useQueryClient } from '@tanstack/react-query'
+import type { UserProfile } from '@/types/app.types'
 
 const C = {
   bg: '#050505', surf: '#131313', line: '#242424', line2: '#2e2e2e',
@@ -20,12 +21,23 @@ function tag(color = C.mute): React.CSSProperties {
   return { fontFamily: F.mono, fontSize: 10, letterSpacing: '0.18em', color, textTransform: 'uppercase' as const }
 }
 
+const SPLIT_LABELS: Record<string, string> = {
+  full_body: 'FULL BODY',
+  ppl: 'PUSH/PULL/LEGS',
+  upper_lower: 'UPPER/LOWER',
+  bro_split: 'BRO SPLIT',
+}
+
 export default function ProfilePage() {
   const { user } = useAuthStore()
   const { data: profile } = useUserProfile()
   const { data: score } = useScore()
+  const { data: settings } = useUserSettings()
+  const { data: weightLogs } = useWeightHistory()
   const queryClient = useQueryClient()
   const [signingOut, setSigningOut] = useState(false)
+
+  const typedProfile = profile as UserProfile | undefined
 
   const displayName = (profile as { full_name?: string } | undefined)?.full_name
     || (user?.user_metadata as Record<string, string> | undefined)?.full_name
@@ -34,8 +46,36 @@ export default function ProfilePage() {
 
   const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
 
-  const sessions = (score?.total_score ?? 0) > 0 ? Math.floor((score?.total_score ?? 0) / 10) : 42
-  const hours = Math.round(sessions * 0.9 * 10) / 10
+  // Real stats from score table
+  const totalSessions = score?.total_sessions ?? 0
+  const totalHours = Math.round(totalSessions * 0.75)
+  const totalReps = score?.total_reps ?? 0
+  const repLabel = totalReps >= 1000 ? `${Math.round(totalReps / 1000)}K` : String(totalReps)
+
+  // Body comp from weight history
+  const latestLog = weightLogs?.[0]
+  const prevLog = weightLogs?.[1]
+  const isKg = latestLog?.unit === 'kg'
+  const weightVal = latestLog
+    ? (isKg && settings?.weight_unit !== 'lbs'
+        ? latestLog.weight.toFixed(1)
+        : (latestLog.weight * (isKg ? 2.20462 : 1)).toFixed(1))
+    : '—'
+  const weightUnit = latestLog ? (isKg && settings?.weight_unit !== 'lbs' ? 'KG' : 'LB') : 'LB'
+  const weightDelta = latestLog && prevLog
+    ? (() => {
+        const diff = (latestLog.weight - prevLog.weight) * (isKg ? 2.20462 : 1)
+        return (diff >= 0 ? '+' : '') + diff.toFixed(1)
+      })()
+    : '—'
+
+  // Preferences from profile + settings
+  const splitLabel = SPLIT_LABELS[typedProfile?.split_preference ?? ''] ?? 'FULL BODY'
+  const daysPerWeek = typedProfile?.training_days ?? 4
+  const programValue = `${splitLabel} · ${daysPerWeek}×/WK`
+  const unitValue = settings?.weight_unit === 'kg' ? 'KILOGRAMS · KG' : 'POUNDS · LB'
+  const aiValue = settings?.ai_mode === 'smart' ? 'SMART · CLAUDE' : 'LITE · STANDARD'
+  const equipValue = typedProfile?.equipment?.join(' + ').toUpperCase() ?? 'GYM'
 
   const handleSignOut = async () => {
     setSigningOut(true)
@@ -47,7 +87,7 @@ export default function ProfilePage() {
     <div style={{ minHeight: '100dvh', background: C.bg, overflowY: 'auto', paddingBottom: 120 }}>
       <div style={{ padding: '68px 24px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={tag()}>ME · MEMBER 0492</span>
+          <span style={tag()}>ME · {typedProfile?.goal?.toUpperCase() ?? 'ATHLETE'}</span>
           <span style={tag()}>⚙ SETTINGS</span>
         </div>
 
@@ -64,7 +104,7 @@ export default function ProfilePage() {
               position: 'absolute', bottom: -6, right: -6,
               background: C.lime, color: '#0a0a0a', padding: '2px 6px',
               fontFamily: F.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-            }}>PRO</div>
+            }}>LVL {score?.level ?? 1}</div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontFamily: F.disp, fontWeight: 700, fontSize: 34, color: C.fg, textTransform: 'uppercase', lineHeight: 1 }}>
@@ -80,10 +120,10 @@ export default function ProfilePage() {
       {/* Stats strip */}
       <div style={{ marginTop: 24, borderTop: '1px solid ' + C.line, borderBottom: '1px solid ' + C.line, display: 'flex' }}>
         {[
-          ['SESSIONS', String(sessions)],
-          ['HOURS', String(hours)],
-          ['VOL · LB', '420K'],
-          ['PRS', String(score?.level ?? 17)],
+          ['SESSIONS', String(totalSessions)],
+          ['HOURS', String(totalHours)],
+          ['REPS', repLabel],
+          ['LEVEL', String(score?.level ?? 1)],
         ].map(([k, v], i, a) => (
           <div key={k} style={{ flex: 1, padding: '18px 12px', borderRight: i < a.length - 1 ? '1px solid ' + C.line : 'none' }}>
             <span style={tag()}>{k}</span>
@@ -95,14 +135,14 @@ export default function ProfilePage() {
       {/* Body composition */}
       <div style={{ padding: '22px 24px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={tag()}>BODY · TODAY</span>
+          <span style={tag()}>BODY · {latestLog ? new Date(latestLog.logged_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase() : 'NOT LOGGED'}</span>
           <span style={{ ...tag(C.lime), cursor: 'pointer' }}>+ LOG</span>
         </div>
         <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: C.line }}>
           {[
-            ['WEIGHT', '174.2', 'LB', '−1.8'],
-            ['BF EST', '14', '%', '−2'],
-            ['SLEEP', '7.4', 'HR', '+0.6'],
+            ['WEIGHT', weightVal, weightUnit, weightDelta],
+            ['SESSIONS', String(totalSessions), 'TOTAL', score?.current_streak ? `${score.current_streak} STREAK` : '—'],
+            ['LEVEL', String(score?.level ?? 1), 'LVL', `${score?.total_score ?? 0} PTS`],
           ].map(([k, v, u, d]) => (
             <div key={k} style={{ background: C.bg, padding: '14px 12px' }}>
               <span style={tag()}>{k}</span>
@@ -131,7 +171,7 @@ export default function ProfilePage() {
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: F.disp, fontSize: 22, fontWeight: 600, color: C.fg, letterSpacing: '0.03em' }}>MARLO</div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.mute, letterSpacing: '0.08em', marginTop: 2 }}>
-              ADAPTIVE · STRENGTH-FOCUSED · DIRECT
+              {aiValue === 'SMART · CLAUDE' ? 'ADAPTIVE · STRENGTH-FOCUSED · SMART AI' : 'ADAPTIVE · STRENGTH-FOCUSED · LITE'}
             </div>
           </div>
           <span style={{ fontFamily: F.mono, fontSize: 11, color: C.fg2, letterSpacing: '0.1em' }}>SWAP →</span>
@@ -143,12 +183,12 @@ export default function ProfilePage() {
         <span style={tag()}>PREFERENCES</span>
         <div style={{ marginTop: 12 }}>
           {[
-            ['PROGRAM', 'PUSH/PULL/LEGS · 4×/WK'],
-            ['UNITS', 'POUNDS · LB'],
+            ['PROGRAM', programValue],
+            ['UNITS', unitValue],
+            ['EQUIPMENT', equipValue],
+            ['AI MODE', aiValue],
             ['REST TIMER', 'AUTO 90S'],
             ['HAPTICS', 'ON'],
-            ['COACH VOICE', 'TERSE · ON'],
-            ['WORKOUT MUSIC', 'OFF'],
           ].map(([k, v], i, a) => (
             <div key={k} style={{
               padding: '14px 0', borderBottom: i < a.length - 1 ? '1px solid ' + C.line : 'none',

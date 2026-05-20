@@ -1,6 +1,8 @@
 import { sessionTypeLabel } from '@/lib/workoutEngine'
 import type { Exercise, SessionType, TimeSlot } from '@/types/app.types'
 import type { SessionConfig } from '@/lib/workoutEngine'
+import { useScore } from '@/hooks/useScore'
+import { useAuthStore } from '@/stores/authStore'
 
 export type Readiness = 'great' | 'good' | 'tired'
 
@@ -52,6 +54,9 @@ export function WorkoutPreview({
   sessionType, warmup, main, cooldown, config, onStart, isStarting,
   isComeback, painFollowUp, onPainFollowUp,
 }: Props) {
+  const { data: score } = useScore()
+  const { user } = useAuthStore()
+
   const sessionLabel = sessionTypeLabel(sessionType).toUpperCase()
   const estimatedMins = estimateMins(warmup.length, main.length, cooldown.length, config.setsPerExercise, config.baseRestSeconds)
   const totalExercises = warmup.length + main.length + cooldown.length
@@ -63,7 +68,12 @@ export function WorkoutPreview({
   const todayIdx = now.getDay()
 
   const allExercises = [...warmup, ...main, ...cooldown]
-  const readiness = 92
+
+  const streakDays = score?.current_streak ?? 0
+  const readiness = streakDays === 0 ? 55 : Math.min(100, 40 + streakDays * 4)
+  const weekNum = user?.created_at
+    ? Math.max(1, Math.ceil((Date.now() - new Date(user.created_at).getTime()) / (7 * 86400000)))
+    : 1
 
   return (
     <div style={{ overflowY: 'auto', paddingBottom: 120 }}>
@@ -71,11 +81,11 @@ export function WorkoutPreview({
       <div style={{ padding: '68px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ display: 'inline-block', width: 6, height: 6, background: C.lime, borderRadius: '50%' }} />
-          <span style={tag(C.fg2)}>WK 01 · {dayNames[todayIdx]} · {monthNames[now.getMonth()]} {now.getDate()}</span>
+          <span style={tag(C.fg2)}>WK {weekNum.toString().padStart(2, '0')} · {dayNames[todayIdx]} · {monthNames[now.getMonth()]} {now.getDate()}</span>
         </div>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
           <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1c0 3-4 4-4 8a4 4 0 008 0c0-2-1-3-2-4 1 0 2 1 2 2 1-2-1-5-4-6z" fill={C.lime}/></svg>
-          <span style={{ fontFamily: F.mono, fontSize: 12, color: C.fg, letterSpacing: '0.06em', fontWeight: 600 }}>11</span>
+          <span style={{ fontFamily: F.mono, fontSize: 12, color: C.fg, letterSpacing: '0.06em', fontWeight: 600 }}>{streakDays}</span>
         </div>
       </div>
 
