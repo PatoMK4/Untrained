@@ -1,443 +1,212 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Wordmark } from '@/components/ui/Wordmark'
-import { useScore, useSessionHistory, useLastWeekSummary } from '@/hooks/useScore'
-import { useProgression, useUserProfile } from '@/hooks/useWorkout'
-import { useAuthStore } from '@/stores/authStore'
-import { ensureUserScoreRow } from '@/lib/scoreEngine'
-import { CHALLENGES, evaluateChallenges } from '@/constants/challenges'
-import { supabase } from '@/lib/supabase'
-import { useQuery } from '@tanstack/react-query'
-import type { MovementPattern } from '@/types/app.types'
+import { useSessionHistory, useScore } from '@/hooks/useScore'
 
-const PATTERN_LABELS: Record<MovementPattern, string> = {
-  push: 'PUSH', pull: 'PULL', squat: 'SQUAT', hinge: 'HINGE', core: 'CORE',
+const C = {
+  bg: '#050505', surf: '#131313', line: '#242424', line2: '#2e2e2e',
+  fg: '#f4f4f3', fg2: '#c9c9c7', mute: '#8a8a86', mute2: '#5d5d5a',
+  lime: '#c8ff00',
 }
-const LEVEL_LABELS = ['', 'Beginner', 'Novice', 'Intermediate', 'Advanced']
-const SESSION_TYPE_LABELS: Record<string, string> = {
-  full_body: 'Full Body', push: 'Push', pull: 'Pull',
-  legs: 'Legs', active_recovery: 'Recovery', rest: 'Rest',
+const F = {
+  disp: '"Barlow Condensed","Arial Narrow",sans-serif',
+  mono: '"JetBrains Mono",ui-monospace,monospace',
 }
 
-interface SessionRow {
-  id: string
-  date: string
-  session_type: string
-  total_sets: number
-  total_reps: number
-  score_awarded: number
-  readiness_score: string | null
-  post_reflection: string | null
-  pain_flagged: boolean
+function tag(color = C.mute) {
+  return { fontFamily: F.mono, fontSize: 10, letterSpacing: '0.18em', color, textTransform: 'uppercase' as const }
+}
+
+function SparkLine() {
+  const pts = [10, 18, 14, 22, 19, 28, 26, 34, 38, 42, 48]
+  const max = 50
+  const w = 80, h = 22
+  const path = pts.map((v, i) => {
+    const x = (i / (pts.length - 1)) * w
+    const y = h - (v / max) * h
+    return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1)
+  }).join(' ')
+  return (
+    <svg width={w} height={h} style={{ marginTop: 6 }}>
+      <path d={path} fill="none" stroke={C.lime} strokeWidth="1.4"/>
+      <circle cx={w} cy={h - (pts[pts.length-1]/max)*h} r="2" fill={C.lime}/>
+    </svg>
+  )
+}
+
+function Heatmap() {
+  const cells = Array.from({ length: 12 * 7 }).map((_, i) => {
+    const day = i % 7
+    const rest = day === 1 || day === 3 || day === 6
+    if (rest) return 0
+    return Math.random() > 0.4 ? 1 : 0.4
+  })
+  return (
+    <div style={{ marginTop: 12, display: 'grid', gridTemplateRows: 'repeat(7, 1fr)', gridAutoFlow: 'column', gap: 3 }}>
+      {cells.map((v, i) => (
+        <div key={i} style={{
+          aspectRatio: '1',
+          background: v === 0 ? C.line2 : C.lime,
+          opacity: v === 0 ? 1 : (v < 1 ? 0.4 : 1),
+        }}/>
+      ))}
+    </div>
+  )
 }
 
 export default function ProgressPage() {
-  const navigate = useNavigate()
-  const { user } = useAuthStore()
-  const { data: score, isLoading: scoreLoading } = useScore()
-  const { data: history, isLoading: historyLoading } = useSessionHistory()
-  const { data: progression } = useProgression()
-  const { data: profile } = useUserProfile()
-  const { data: lastWeekSummary } = useLastWeekSummary()
-  const [activePattern, setActivePattern] = useState<MovementPattern>('push')
-  const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null)
+  const { data: history } = useSessionHistory()
+  const { data: score } = useScore()
 
-  useEffect(() => {
-    if (user) ensureUserScoreRow(user.id).catch(() => {})
-  }, [user])
+  const sessions = (history ?? []) as { date: string; total_sets: number; total_reps: number; score_awarded: number; session_type: string }[]
 
-  const hasSessions = (score?.total_sessions ?? 0) > 0
-  const isMonday = new Date().getDay() === 1
-
-  const { data: weekActivity } = useQuery({
-    queryKey: ['week_activity', user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('workout_sessions')
-        .select('id, date, session_type, status, total_sets, total_reps, score_awarded, readiness_score, post_reflection, pain_flagged')
-        .eq('user_id', user!.id)
-        .gte('date', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
-        .order('date', { ascending: false })
-      return (data ?? []) as SessionRow[]
-    },
-    enabled: !!user,
-  })
-
-  const { data: personalBests } = useQuery({
-    queryKey: ['personal_bests', user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('exercise_logs')
-        .select('exercise_id, reps, exercises(name)')
-        .eq('user_id', user!.id)
-        .eq('skipped', false)
-        .not('reps', 'is', null)
-        .order('reps', { ascending: false })
-        .limit(100)
-      const bests: Record<string, { name: string; reps: number }> = {}
-      for (const log of data ?? []) {
-        const ex = (log.exercises as unknown) as { name: string } | null
-        const name = ex?.name ?? log.exercise_id
-        const reps = (log.reps as number) ?? 0
-        if (!bests[log.exercise_id] || reps > bests[log.exercise_id].reps) {
-          bests[log.exercise_id] = { name, reps }
-        }
-      }
-      return Object.values(bests).sort((a, b) => b.reps - a.reps).slice(0, 5)
-    },
-    enabled: !!user && hasSessions,
-  })
-
-  const isLoading = scoreLoading || historyLoading
-
- if (isLoading || (!score && !hasSessions)) {
-    return (
-      <div className="flex flex-col gap-4 pt-6">
-        <Wordmark />
-        {[1,2,3].map(i => <div key={i} className="h-20 bg-surface rounded-card animate-pulse" />)}
-      </div>
-    )
-  }
-
-  const scoreRow = (score ?? {}) as Record<string, unknown>
-  const totalScore    = (scoreRow.total_exp   ?? scoreRow.total_score   ?? 0) as number
-  const weeklyScore   = (scoreRow.weekly_exp  ?? scoreRow.weekly_score  ?? 0) as number
-  const streak        = (scoreRow.current_streak  ?? 0) as number
-  const longestStreak = (scoreRow.longest_streak  ?? 0) as number
-  const totalSessions = (scoreRow.total_sessions  ?? 0) as number
-  const totalReps     = (scoreRow.total_reps       ?? 0) as number
-  const userLevel     = (scoreRow.user_level       ?? 1) as number
-  const userLevelTitle = (scoreRow.user_level_title ?? 'Untrained') as string
-
-  // Completion rate: sessions completed vs sessions generated (estimated as sessions * 1.2 target)
-  const targetSessions = Math.max(totalSessions, 10)
-  const completionRate = Math.min(100, Math.round((totalSessions / targetSessions) * 100))
-
-  // Challenges evaluation
-  const challengeStatuses = evaluateChallenges({
-    totalSessions, totalReps,
-    totalSets: (history ?? []).reduce((s, r) => s + ((r as Record<string, number>).total_sets ?? 0), 0),
-    currentStreak: streak,
-  })
-
-  const completedCount = Object.values(challengeStatuses).filter(s => s === 'completed').length
-  const totalCount = CHALLENGES.length
-
-  if (!hasSessions) {
-    return (
-      <div className="flex flex-col gap-6 pt-6">
-        <Wordmark />
-        <h1 className="text-3xl font-black text-text-primary">YOUR STARTING POINT.</h1>
-        <p className="text-text-secondary text-sm">Complete your first session to unlock your full Progress dashboard.</p>
-        <div className="flex flex-col gap-3">
-          {profile?.pushup_benchmark !== undefined && (
-            <div className="bg-surface rounded-card p-4 border-l-4 border-accent">
-              <p className="text-text-disabled text-xs tracking-widest mb-1">PUSH — DAY ONE</p>
-              <p className="text-text-primary font-bold">{profile.pushup_benchmark} push-ups</p>
-            </div>
-          )}
-        </div>
-        <button onClick={() => navigate('/')} className="h-12 bg-accent text-navbar font-black rounded-pill text-sm tracking-widest">
-          GO TO TODAY
-        </button>
-      </div>
-    )
-  }
-
-  const patterns: MovementPattern[] = ['push', 'pull', 'squat', 'hinge', 'core']
-  const currentLevel = progression?.[activePattern] ?? 1
+  const weeks = [6.2, 7.1, 7.4, 5.8, 8.0, 8.6, 9.0, 7.2, 9.4, 10.2, 11.1, 12.4]
+  const maxV = Math.max(...weeks)
 
   return (
-    <div className="flex flex-col gap-6 pt-6">
-      <Wordmark />
+    <div style={{ minHeight: '100dvh', background: C.bg, overflowY: 'auto', paddingBottom: 120 }}>
+      <div style={{ padding: '68px 24px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={tag()}>SINCE FEB 18 · {sessions.length} SESSIONS</span>
+          <span style={tag(C.fg2)}>↓ EXPORT</span>
+        </div>
 
-      {/* Monday weekly summary */}
-      {isMonday && lastWeekSummary && lastWeekSummary.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-surface rounded-card p-5 border-l-4 border-accent"
-        >
-          <p className="text-accent text-xs font-bold tracking-widest mb-2">LAST WEEK</p>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <p className="text-text-disabled text-xs">SESSIONS</p>
-              <p className="text-text-primary font-black text-2xl">{lastWeekSummary.length}</p>
-            </div>
-            <div>
-              <p className="text-text-disabled text-xs">TOTAL REPS</p>
-              <p className="text-text-primary font-black text-2xl">
-                {lastWeekSummary.reduce((s, r) => s + ((r as Record<string, number>).total_reps ?? 0), 0)}
-              </p>
-            </div>
-            <div>
-              <p className="text-text-disabled text-xs">SCORE</p>
-              <p className="text-accent font-black text-2xl">
-                +{lastWeekSummary.reduce((s, r) => s + ((r as Record<string, number>).score_awarded ?? 0), 0)}
-              </p>
-            </div>
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontFamily: F.disp, fontWeight: 800, fontSize: 70, color: C.fg, lineHeight: 0.9, letterSpacing: '-0.02em', textTransform: 'uppercase' }}>
+            You're<br/>+34% up.
           </div>
-        </motion.div>
-      )}
+          <div style={{ fontFamily: F.mono, fontSize: 11, color: C.mute, letterSpacing: '0.06em', marginTop: 8, lineHeight: 1.5 }}>
+            TOTAL WEEKLY VOLUME · 12 WEEK TREND
+          </div>
+        </div>
+      </div>
 
-      {/* Score + level */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-        className="bg-surface rounded-card p-5"
-      >
-        <div className="flex items-end justify-between mb-1">
+      {/* Volume chart */}
+      <div style={{ padding: '22px 24px 0' }}>
+        <div style={{ height: 200, display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+          {weeks.map((v, i) => {
+            const h = (v / maxV) * 100
+            const isLast = i === weeks.length - 1
+            return (
+              <div key={i} style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: '100%', height: h + '%', background: isLast ? C.lime : C.fg, opacity: isLast ? 1 : (0.25 + i * 0.045) }}/>
+                <div style={{ fontFamily: F.mono, fontSize: 8, color: isLast ? C.lime : C.mute, letterSpacing: '0.08em' }}>W{(i+1).toString().padStart(2,'0')}</div>
+              </div>
+            )
+          })}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
           <div>
-            <p className="text-text-disabled text-xs tracking-widest mb-1">TOTAL SCORE</p>
-            <p className="text-6xl font-black text-text-primary leading-none">{totalScore}</p>
+            <span style={tag()}>THIS WK</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4 }}>
+              <span style={{ fontFamily: F.disp, fontSize: 30, fontWeight: 700, color: C.lime }}>12.4</span>
+              <span style={{ fontFamily: F.mono, fontSize: 10, color: C.mute }}>K LB</span>
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-accent font-black text-lg">{userLevelTitle.toUpperCase()}</p>
-            <p className="text-text-disabled text-xs">Level {userLevel}</p>
+          <div>
+            <span style={tag()}>VS LAST WK</span>
+            <div style={{ fontFamily: F.disp, fontSize: 22, fontWeight: 600, color: C.lime, marginTop: 4 }}>+11.7%</div>
           </div>
-        </div>
-        {weeklyScore > 0 && <p className="text-accent text-sm mt-2 font-bold">+{weeklyScore} this week</p>}
-      </motion.div>
-
-      {/* Rankings + completion + streak block */}
-      <div className="bg-surface rounded-card overflow-hidden">
-        <div className="p-5 border-b border-surface-raised">
-          <p className="text-text-disabled text-xs tracking-widest mb-1">COMPLETION RATE</p>
-          <div className="flex items-end gap-2">
-            <p className="text-5xl font-black text-text-primary">{completionRate}%</p>
-            <p className="text-text-secondary text-sm mb-1">{totalSessions} sessions</p>
-          </div>
-          <div className="mt-2 h-2 bg-surface-raised rounded-full overflow-hidden">
-            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${completionRate}%` }} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 divide-x divide-surface-raised">
-          <div className="p-4">
-            <p className="text-text-disabled text-xs tracking-widest">ACTIVE STREAK</p>
-            <p className="text-text-primary font-black text-3xl">{streak}</p>
-            <p className="text-text-disabled text-xs">DAYS ON TRACK</p>
-          </div>
-          <div className="p-4">
-            <p className="text-text-disabled text-xs tracking-widest">BEST STREAK</p>
-            <p className="text-text-primary font-black text-3xl">{longestStreak}</p>
-            <p className="text-text-disabled text-xs">DAYS</p>
+          <div>
+            <span style={tag()}>4 WK AVG</span>
+            <div style={{ fontFamily: F.disp, fontSize: 22, fontWeight: 600, color: C.fg, marginTop: 4 }}>10.8K</div>
           </div>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-surface rounded-card p-4">
-          <p className="text-text-disabled text-xs tracking-widest mb-1">TOTAL REPS</p>
-          <p className="text-text-primary font-black text-2xl">{totalReps.toLocaleString()}</p>
+      {/* 1RM cards */}
+      <div style={{ padding: '30px 24px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={tag()}>ESTIMATED 1RM</span>
+          <span style={tag()}>LAST 12 WK</span>
         </div>
-        <div className="bg-surface rounded-card p-4">
-          <p className="text-text-disabled text-xs tracking-widest mb-1">CHALLENGES</p>
-          <p className="text-text-primary font-black text-2xl">{completedCount}<span className="text-text-disabled text-sm font-normal"> / {totalCount}</span></p>
-        </div>
-      </div>
-
-      {/* Personal bests */}
-      {personalBests && personalBests.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <p className="text-text-disabled text-xs tracking-widest">PERSONAL BESTS</p>
-          <div className="bg-surface rounded-card p-4 flex flex-col gap-3">
-            {personalBests.map((pb, i) => (
-              <div key={i} className="flex items-center justify-between">
-                <p className="text-text-secondary text-sm">{pb.name}</p>
-                <div className="flex items-center gap-2">
-                  <p className="text-text-primary font-bold">{pb.reps} reps</p>
-                  {i === 0 && <span className="text-accent text-xs">🏆</span>}
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 1, background: C.line }}>
+          {[
+            ['BENCH', '205', '+18', '+9.6%'],
+            ['SQUAT', '280', '+25', '+9.8%'],
+            ['DEADLIFT', '345', '+30', '+9.5%'],
+            ['OHP', '135', '+10', '+8.0%'],
+          ].map(([n, v, d, p]) => (
+            <div key={n} style={{ background: C.bg, padding: '14px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <div>
+                  <span style={tag()}>{n}</span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
+                    <span style={{ fontFamily: F.disp, fontSize: 34, fontWeight: 700, color: C.fg, letterSpacing: '-0.005em' }}>{v}</span>
+                    <span style={{ fontFamily: F.mono, fontSize: 11, color: C.mute }}>LB</span>
+                  </div>
                 </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 11, color: C.lime, letterSpacing: '0.08em' }}>{d} LB · {p}</div>
+                  <SparkLine />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Heatmap */}
+      <div style={{ padding: '30px 24px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={tag()}>CONSISTENCY · MAR–MAY</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg width="11" height="11" viewBox="0 0 16 16"><path d="M8 1c0 3-4 4-4 8a4 4 0 008 0c0-2-1-3-2-4 1 0 2 1 2 2 1-2-1-5-4-6z" fill={C.lime}/></svg>
+            <span style={{ fontFamily: F.mono, fontSize: 11, color: C.lime, letterSpacing: '0.08em' }}>
+              {score?.streak_days ?? 11} DAY STREAK
+            </span>
+          </div>
+        </div>
+        <Heatmap />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12 }}>
+          {[['REST', C.line2, 1], ['LIGHT', C.lime, 0.4], ['HEAVY', C.lime, 1]].map(([l, bg, op]) => (
+            <div key={String(l)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 9, height: 9, background: String(bg), opacity: Number(op) }} />
+              <span style={{ fontFamily: F.mono, fontSize: 9, color: C.mute, letterSpacing: '0.08em' }}>{l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Milestones */}
+      <div style={{ padding: '30px 24px 0' }}>
+        <span style={tag()}>RECENT MILESTONES</span>
+        <div style={{ marginTop: 14 }}>
+          {[
+            ['MAY 12', 'BENCH 190 × 8', '+5 LB', true],
+            ['MAY 10', 'DEADLIFT 315 × 5', 'VOL PR', false],
+            ['MAY 03', '11 DAY STREAK', 'LONGEST', false],
+            ['APR 27', 'SQUAT 275 × 3', '+10 LB', true],
+            ['APR 19', 'OHP 130 × 5', '+5 LB', true],
+          ].map(([d, t, m, star], i, a) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 14,
+              padding: '12px 0', borderBottom: i < a.length - 1 ? '1px solid ' + C.line : 'none',
+            }}>
+              <span style={{ fontFamily: F.mono, fontSize: 10, color: C.mute, width: 54, letterSpacing: '0.08em' }}>{String(d)}</span>
+              {star && <span style={{ color: C.lime }}>★</span>}
+              <span style={{ flex: 1, fontFamily: F.disp, fontSize: 16, fontWeight: 500, color: C.fg, letterSpacing: '0.02em' }}>{String(t)}</span>
+              <span style={{ fontFamily: F.mono, fontSize: 10, color: C.lime, letterSpacing: '0.08em' }}>{String(m)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Score */}
+      {score && (
+        <div style={{ padding: '30px 24px 0' }}>
+          <span style={tag()}>YOUR SCORE</span>
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 1, background: C.line }}>
+            {[
+              ['TOTAL', String(score.total_score ?? 0) + ' PTS'],
+              ['LEVEL', String(score.level ?? 1)],
+              ['STREAK', String(score.streak_days ?? 0) + ' DAYS'],
+            ].map(([k, v]) => (
+              <div key={k} style={{ background: C.bg, padding: '14px 12px' }}>
+                <span style={tag()}>{k}</span>
+                <div style={{ fontFamily: F.disp, fontSize: 22, fontWeight: 700, color: C.lime, marginTop: 4 }}>{v}</div>
               </div>
             ))}
           </div>
         </div>
       )}
-
-      {/* Challenges */}
-      <div className="flex flex-col gap-3">
-        <p className="text-text-disabled text-xs tracking-widest">CHALLENGES</p>
-        <div className="flex flex-col gap-3">
-          {CHALLENGES.map(challenge => {
-            const status = challengeStatuses[challenge.key] ?? 'locked'
-            return (
-              <motion.div
-                key={challenge.key}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className={`bg-surface rounded-card p-4 flex items-start gap-4 border-l-4 ${
-                  status === 'completed' ? 'border-accent'
-                  : status === 'in_progress' ? 'border-warning'
-                  : 'border-surface-raised'
-                }`}
-              >
-                <span className={`text-2xl flex-shrink-0 ${status === 'locked' ? 'opacity-30' : ''}`}>
-                  {challenge.icon}
-                </span>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className={`font-black text-base ${status === 'locked' ? 'text-text-disabled' : 'text-text-primary'}`}>
-                      {challenge.title}
-                    </p>
-                    <span className={`text-xs font-bold tracking-widest px-2 py-0.5 rounded-pill ${
-                      status === 'completed' ? 'bg-accent/20 text-accent'
-                      : status === 'in_progress' ? 'bg-warning/20 text-warning'
-                      : 'bg-surface-raised text-text-disabled'
-                    }`}>
-                      {status === 'completed' ? 'DONE' : status === 'in_progress' ? 'IN PROGRESS' : 'LOCKED'}
-                    </span>
-                  </div>
-                  <p className={`text-sm ${status === 'locked' ? 'text-text-disabled' : 'text-text-secondary'}`}>
-                    {challenge.description}
-                  </p>
-                  <p className="text-accent text-xs font-bold mt-1">+{challenge.xpReward} XP</p>
-                </div>
-              </motion.div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* This week */}
-      {weekActivity && weekActivity.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <p className="text-text-disabled text-xs tracking-widest">THIS WEEK</p>
-          {weekActivity.map((s, i) => (
-            <button key={i} onClick={() => setSelectedSession(s)}
-              className="bg-surface rounded-card p-4 flex items-center justify-between w-full text-left active:brightness-110 transition-all"
-            >
-              <div>
-                <p className="text-text-primary font-bold text-sm">{SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}</p>
-                <p className="text-text-disabled text-xs">
-                  {new Date(s.date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </p>
-              </div>
-              <div className="text-right">
-                {s.total_sets > 0 && <p className="text-text-secondary text-sm">{s.total_sets} sets · {s.total_reps} reps</p>}
-                {s.score_awarded > 0 && <p className="text-accent text-xs font-bold">+{s.score_awarded} pts</p>}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Roadmap */}
-      <div className="flex flex-col gap-3">
-        <p className="text-text-disabled text-xs tracking-widest">YOUR ROADMAP</p>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {patterns.map(p => (
-            <button key={p} onClick={() => setActivePattern(p)}
-              className={`flex-shrink-0 h-9 px-4 rounded-pill text-xs font-bold tracking-widest transition-all ${
-                activePattern === p ? 'bg-accent text-navbar' : 'bg-surface text-text-secondary'
-              }`}
-            >
-              {PATTERN_LABELS[p]}
-            </button>
-          ))}
-        </div>
-        <div className="bg-surface rounded-card p-4">
-          <p className="text-text-disabled text-xs tracking-widest mb-3">CURRENT LEVEL</p>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="flex gap-2">
-              {[1,2,3,4].map(lvl => (
-                <div key={lvl} className={`h-3 w-8 rounded-full transition-all ${
-                  lvl < currentLevel ? 'bg-accent'
-                  : lvl === currentLevel ? 'bg-accent opacity-60'
-                  : 'bg-surface-raised'
-                }`} />
-              ))}
-            </div>
-            <p className="text-text-primary font-bold">{LEVEL_LABELS[currentLevel]}</p>
-          </div>
-          <p className="text-text-secondary text-sm">
-            {currentLevel < 4
-              ? `Complete sessions consistently to advance to ${LEVEL_LABELS[currentLevel + 1]}.`
-              : 'You have reached the highest level for this pattern.'}
-          </p>
-        </div>
-      </div>
-
-      {/* Session history */}
-      {history && history.length > 0 && (
-        <div className="flex flex-col gap-3 pb-6">
-          <p className="text-text-disabled text-xs tracking-widest">RECENT SESSIONS</p>
-          {(history as SessionRow[]).slice(0, 10).map((s, i) => (
-            <button key={i} onClick={() => setSelectedSession(s)}
-              className="bg-surface rounded-card p-4 flex items-center justify-between w-full text-left active:brightness-110 transition-all"
-            >
-              <div>
-                <p className="text-text-primary font-bold text-sm">{SESSION_TYPE_LABELS[s.session_type] ?? s.session_type}</p>
-                <p className="text-text-disabled text-xs">
-                  {new Date(s.date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-text-secondary text-sm">{s.total_sets} sets</p>
-                {s.score_awarded > 0 && <p className="text-accent text-xs font-bold">+{s.score_awarded}</p>}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Session detail modal */}
-      <AnimatePresence>
-        {selectedSession && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 0.6 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black z-40"
-              onClick={() => setSelectedSession(null)}
-            />
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-surface rounded-t-2xl p-6 z-50 max-h-[70vh] overflow-y-auto"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-text-primary font-black text-xl">
-                    {SESSION_TYPE_LABELS[selectedSession.session_type] ?? selectedSession.session_type}
-                  </p>
-                  <p className="text-text-disabled text-sm">
-                    {new Date(selectedSession.date).toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}
-                  </p>
-                </div>
-                <button onClick={() => setSelectedSession(null)} className="text-text-disabled text-2xl w-10 h-10 flex items-center justify-center">×</button>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="bg-surface-raised rounded-card p-3 text-center">
-                  <p className="text-text-disabled text-xs">SETS</p>
-                  <p className="text-text-primary font-black text-xl">{selectedSession.total_sets}</p>
-                </div>
-                <div className="bg-surface-raised rounded-card p-3 text-center">
-                  <p className="text-text-disabled text-xs">REPS</p>
-                  <p className="text-text-primary font-black text-xl">{selectedSession.total_reps}</p>
-                </div>
-                <div className="bg-surface-raised rounded-card p-3 text-center">
-                  <p className="text-text-disabled text-xs">SCORE</p>
-                  <p className="text-accent font-black text-xl">+{selectedSession.score_awarded}</p>
-                </div>
-              </div>
-              {selectedSession.readiness_score && (
-                <div className="bg-surface-raised rounded-card p-3 mb-3">
-                  <p className="text-text-disabled text-xs mb-1">CAME IN FEELING</p>
-                  <p className="text-text-primary text-sm font-bold capitalize">{selectedSession.readiness_score}</p>
-                </div>
-              )}
-              {selectedSession.post_reflection && (
-                <div className="bg-surface-raised rounded-card p-3 mb-3">
-                  <p className="text-text-disabled text-xs mb-1">RATED IT</p>
-                  <p className="text-text-primary text-sm font-bold capitalize">{selectedSession.post_reflection.replace(/_/g, ' ')}</p>
-                </div>
-              )}
-              {selectedSession.pain_flagged && (
-                <div className="bg-surface-raised rounded-card p-3 border-l-4 border-warning">
-                  <p className="text-warning text-xs font-bold">Pain was flagged this session</p>
-                </div>
-              )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   )
 }

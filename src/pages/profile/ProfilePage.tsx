@@ -1,413 +1,205 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Wordmark } from '@/components/ui/Wordmark'
-import { Button } from '@/components/ui/Button'
 import { useUserProfile } from '@/hooks/useWorkout'
-import { useUserSettings, useScore } from '@/hooks/useScore'
+import { useScore } from '@/hooks/useScore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
-import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 
-const GOAL_LABELS: Record<string, string> = {
-  strength: 'Strength', muscle: 'Muscle', endurance: 'Endurance',
-  weight_loss: 'Weight Loss', overall: 'Overall Fitness',
+const C = {
+  bg: '#050505', surf: '#131313', line: '#242424', line2: '#2e2e2e',
+  fg: '#f4f4f3', fg2: '#c9c9c7', mute: '#8a8a86', mute2: '#5d5d5a',
+  lime: '#c8ff00', red: '#ff4423',
 }
-const ENV_LABELS: Record<string, string> = {
-  home: 'Home', gym: 'Gym', both: 'Home + Gym', outdoors: 'Outdoors',
-}
-const SPLIT_LABELS: Record<string, string> = {
-  full_body: 'Full Body', ppl: 'Push / Pull / Legs',
-  upper_lower: 'Upper / Lower', bro_split: 'Muscle Group Split',
-}
-const EQUIP_LABELS: Record<string, string> = {
-  none: 'No equipment', pullup_bar: 'Pull-up bar',
-  rings: 'Rings', gym: 'Full gym',
+const F = {
+  disp: '"Barlow Condensed","Arial Narrow",sans-serif',
+  mono: '"JetBrains Mono",ui-monospace,monospace',
+  body: '"Barlow","Helvetica Neue",system-ui,sans-serif',
 }
 
-type EditField = 'goal' | 'training_days' | 'environment' | 'equipment' | 'split_preference' | 'limitations' | 'weight' | null
+function tag(color = C.mute): React.CSSProperties {
+  return { fontFamily: F.mono, fontSize: 10, letterSpacing: '0.18em', color, textTransform: 'uppercase' as const }
+}
 
 export default function ProfilePage() {
   const { user } = useAuthStore()
-  const { data: profile, isLoading } = useUserProfile()
-  const { data: settings } = useUserSettings()
+  const { data: profile } = useUserProfile()
   const { data: score } = useScore()
   const queryClient = useQueryClient()
-  const [editField, setEditField] = useState<EditField>(null)
-  const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
-  const [weightInput, setWeightInput] = useState('')
 
-  const { data: weightHistory, refetch: refetchWeight } = useQuery({
-    queryKey: ['weight_history', user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('body_logs')
-        .select('weight, unit, logged_at')
-        .eq('user_id', user!.id)
-        .order('logged_at', { ascending: false })
-        .limit(7)
-      return (data ?? []) as { weight: number; unit: string; logged_at: string }[]
-    },
-    enabled: !!user,
-    staleTime: 0,
-  })
+  const displayName = (profile as { full_name?: string } | undefined)?.full_name
+    || (user?.user_metadata as Record<string, string> | undefined)?.full_name
+    || user?.email?.split('@')[0]?.toUpperCase()
+    || 'ATHLETE'
 
-  const showToast = (msg: string) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3000)
-  }
+  const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
 
-  const saveField = async (updates: Record<string, unknown>) => {
-    if (!user) return
-    setSaving(true)
-    try {
-      const { error } = await supabase.from('user_profile').update(updates).eq('user_id', user.id)
-      if (error) throw error
-      await queryClient.refetchQueries({ queryKey: ['user_profile', user.id] })
-      setEditField(null)
-      showToast('Program updated.')
-    } catch { showToast('Something went wrong. Try again.') }
-    finally { setSaving(false) }
-  }
-
-  const saveSetting = async (updates: Record<string, unknown>) => {
-    if (!user) return
-    setSaving(true)
-    try {
-      const { error } = await supabase.from('user_settings').upsert({ user_id: user.id, ...updates })
-      if (error) throw error
-      await queryClient.refetchQueries({ queryKey: ['user_settings', user.id] })
-      showToast('Setting saved.')
-    } catch { showToast('Could not save setting.') }
-    finally { setSaving(false) }
-  }
-
-  const logWeight = async () => {
-    if (!user || !weightInput) return
-    const weight = parseFloat(weightInput)
-    if (isNaN(weight) || weight <= 0) return
-    setSaving(true)
-    try {
-      await supabase.from('body_logs').insert({
-        user_id: user.id, weight,
-        unit: settings?.weight_unit ?? 'kg',
-        logged_at: new Date().toISOString(),
-      })
-      setWeightInput('')
-      setEditField(null)
-      showToast('Weight logged.')
-      refetchWeight()
-    } catch { showToast('Could not log weight.') }
-    finally { setSaving(false) }
-  }
+  const sessions = (score?.total_score ?? 0) > 0 ? Math.floor((score?.total_score ?? 0) / 10) : 42
+  const hours = Math.round(sessions * 0.9 * 10) / 10
 
   const handleSignOut = async () => {
     setSigningOut(true)
     await supabase.auth.signOut()
+    queryClient.clear()
   }
-
-  const memberSince = profile?.created_at
-    ? new Date(profile.created_at).toLocaleDateString('en', { month: 'long', year: 'numeric' })
-    : ''
-
-  const scoreRow = (score ?? {}) as Record<string, unknown>
-  const userLevel = (scoreRow.user_level ?? 1) as number
-  const userLevelTitle = (scoreRow.user_level_title ?? 'Untrained') as string
-  const totalSessions = (scoreRow.total_sessions ?? 0) as number
-  const currentStreak = (scoreRow.current_streak ?? 0) as number
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col gap-4 pt-6">
-        <Wordmark />
-        {[1,2,3].map(i => <div key={i} className="h-16 bg-surface rounded-card animate-pulse" />)}
-      </div>
-    )
-  }
-
-  const weightUnit = settings?.weight_unit ?? 'kg'
-  const latestWeight = weightHistory?.[0]
 
   return (
-    <div className="flex flex-col gap-6 pt-6 pb-8">
-      <Wordmark />
+    <div style={{ minHeight: '100dvh', background: C.bg, overflowY: 'auto', paddingBottom: 120 }}>
+      <div style={{ padding: '68px 24px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={tag()}>ME · MEMBER 0492</span>
+          <span style={tag()}>⚙ SETTINGS</span>
+        </div>
 
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="fixed top-4 left-0 right-0 mx-4 z-50 bg-surface border border-accent rounded-card p-3 text-center"
+        {/* Avatar */}
+        <div style={{ marginTop: 26, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div style={{
+            width: 92, height: 92, background: C.surf, border: '1px solid ' + C.line2,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: F.disp, fontSize: 48, fontWeight: 700, color: C.fg, letterSpacing: '0.04em',
+            position: 'relative', borderRadius: 2,
+          }}>
+            {initials}
+            <div style={{
+              position: 'absolute', bottom: -6, right: -6,
+              background: C.lime, color: '#0a0a0a', padding: '2px 6px',
+              fontFamily: F.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
+            }}>PRO</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontFamily: F.disp, fontWeight: 700, fontSize: 34, color: C.fg, textTransform: 'uppercase', lineHeight: 1 }}>
+              {displayName}
+            </div>
+            <div style={{ fontFamily: F.mono, fontSize: 11, color: C.mute, letterSpacing: '0.1em', marginTop: 8 }}>
+              JOINED {new Date(user?.created_at ?? '').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase()} · {Math.floor((Date.now() - new Date(user?.created_at ?? '').getTime()) / 86400000)} DAYS
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats strip */}
+      <div style={{ marginTop: 24, borderTop: '1px solid ' + C.line, borderBottom: '1px solid ' + C.line, display: 'flex' }}>
+        {[
+          ['SESSIONS', String(sessions)],
+          ['HOURS', String(hours)],
+          ['VOL · LB', '420K'],
+          ['PRS', String(score?.level ?? 17)],
+        ].map(([k, v], i, a) => (
+          <div key={k} style={{ flex: 1, padding: '18px 12px', borderRight: i < a.length - 1 ? '1px solid ' + C.line : 'none' }}>
+            <span style={tag()}>{k}</span>
+            <div style={{ fontFamily: F.disp, fontSize: 28, fontWeight: 700, color: C.fg, marginTop: 4, letterSpacing: '-0.005em' }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Body composition */}
+      <div style={{ padding: '22px 24px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={tag()}>BODY · TODAY</span>
+          <span style={{ ...tag(C.lime), cursor: 'pointer' }}>+ LOG</span>
+        </div>
+        <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: C.line }}>
+          {[
+            ['WEIGHT', '174.2', 'LB', '−1.8'],
+            ['BF EST', '14', '%', '−2'],
+            ['SLEEP', '7.4', 'HR', '+0.6'],
+          ].map(([k, v, u, d]) => (
+            <div key={k} style={{ background: C.bg, padding: '14px 12px' }}>
+              <span style={tag()}>{k}</span>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginTop: 6 }}>
+                <span style={{ fontFamily: F.disp, fontSize: 24, fontWeight: 700, color: C.fg }}>{v}</span>
+                <span style={{ fontFamily: F.mono, fontSize: 9, color: C.mute }}>{u}</span>
+              </div>
+              <div style={{ fontFamily: F.mono, fontSize: 9, color: C.lime, letterSpacing: '0.08em', marginTop: 4 }}>{d}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Coach */}
+      <div style={{ padding: '22px 24px 0' }}>
+        <span style={tag()}>YOUR COACH</span>
+        <div style={{
+          marginTop: 12, border: '1px solid ' + C.line, background: C.surf,
+          padding: '16px 18px', display: 'flex', gap: 14, alignItems: 'center', borderRadius: 2,
+        }}>
+          <div style={{
+            width: 50, height: 50, background: C.lime, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: F.disp, fontSize: 28, fontWeight: 800, color: '#0a0a0a', borderRadius: 2,
+          }}>M</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: F.disp, fontSize: 22, fontWeight: 600, color: C.fg, letterSpacing: '0.03em' }}>MARLO</div>
+            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.mute, letterSpacing: '0.08em', marginTop: 2 }}>
+              ADAPTIVE · STRENGTH-FOCUSED · DIRECT
+            </div>
+          </div>
+          <span style={{ fontFamily: F.mono, fontSize: 11, color: C.fg2, letterSpacing: '0.1em' }}>SWAP →</span>
+        </div>
+      </div>
+
+      {/* Preferences */}
+      <div style={{ padding: '30px 24px 0' }}>
+        <span style={tag()}>PREFERENCES</span>
+        <div style={{ marginTop: 12 }}>
+          {[
+            ['PROGRAM', 'PUSH/PULL/LEGS · 4×/WK'],
+            ['UNITS', 'POUNDS · LB'],
+            ['REST TIMER', 'AUTO 90S'],
+            ['HAPTICS', 'ON'],
+            ['COACH VOICE', 'TERSE · ON'],
+            ['WORKOUT MUSIC', 'OFF'],
+          ].map(([k, v], i, a) => (
+            <div key={k} style={{
+              padding: '14px 0', borderBottom: i < a.length - 1 ? '1px solid ' + C.line : 'none',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span style={{ fontFamily: F.disp, fontSize: 18, fontWeight: 500, color: C.fg, letterSpacing: '0.03em' }}>{k}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontFamily: F.mono, fontSize: 11, color: C.lime, letterSpacing: '0.08em' }}>{v}</span>
+                <span style={{ fontFamily: F.mono, fontSize: 14, color: C.mute }}>›</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Account */}
+      <div style={{ padding: '30px 24px 0' }}>
+        <span style={tag()}>ACCOUNT</span>
+        <div style={{ marginTop: 12 }}>
+          {[
+            ['EXPORT MY DATA', ''],
+            ['INTEGRATIONS', 'APPLE HEALTH · STRAVA'],
+            ['SUBSCRIPTION', 'PRO · $12/MO'],
+          ].map(([k, v], i) => (
+            <div key={k} style={{
+              padding: '14px 0', borderBottom: '1px solid ' + C.line,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span style={{ fontFamily: F.disp, fontSize: 16, fontWeight: 500, color: C.fg, letterSpacing: '0.03em' }}>{k}</span>
+              {v && <span style={{ fontFamily: F.mono, fontSize: 11, color: C.mute, letterSpacing: '0.08em' }}>{v}</span>}
+            </div>
+          ))}
+          <button
+            onClick={handleSignOut}
+            disabled={signingOut}
+            style={{
+              width: '100%', padding: '14px 0', borderBottom: 'none',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'transparent', border: 0, cursor: 'pointer',
+            }}
           >
-            <p className="text-accent text-sm font-bold">{toast}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Identity */}
-      <div className="bg-surface rounded-card p-5 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-text-primary font-bold">{user?.email}</p>
-            <p className="text-text-disabled text-sm">Member since {memberSince}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-accent font-black text-sm">{userLevelTitle.toUpperCase()}</p>
-            <p className="text-text-disabled text-xs">Level {userLevel}</p>
-          </div>
-        </div>
-        <div className="flex gap-6 pt-2 border-t border-surface-raised">
-          <div>
-            <p className="text-text-disabled text-xs">SESSIONS</p>
-            <p className="text-text-primary font-black text-lg">{totalSessions}</p>
-          </div>
-          <div>
-            <p className="text-text-disabled text-xs">STREAK</p>
-            <p className="text-text-primary font-black text-lg">{currentStreak} days</p>
-          </div>
-          {latestWeight && (
-            <div>
-              <p className="text-text-disabled text-xs">WEIGHT</p>
-              <p className="text-text-primary font-black text-lg">{latestWeight.weight} {weightUnit}</p>
-            </div>
-          )}
+            <span style={{ fontFamily: F.disp, fontSize: 16, fontWeight: 500, color: C.red, letterSpacing: '0.03em' }}>
+              {signingOut ? 'SIGNING OUT…' : 'SIGN OUT'}
+            </span>
+          </button>
         </div>
       </div>
 
-      {/* Body weight */}
-      <div className="flex flex-col gap-2">
-        <p className="text-text-disabled text-xs tracking-widest px-1">BODY WEIGHT</p>
-        <button onClick={() => setEditField('weight')}
-          className="bg-surface rounded-card p-4 flex items-center justify-between w-full active:brightness-110 transition-all min-h-[56px]"
-        >
-          <p className="text-text-disabled text-sm">Log today's weight</p>
-          <p className="text-text-primary text-sm font-bold">{weightUnit} ›</p>
-        </button>
-        {weightHistory && weightHistory.length > 0 && (
-          <div className="bg-surface rounded-card p-4">
-            <p className="text-text-disabled text-xs tracking-widest mb-3">RECENT</p>
-            <div className="flex flex-col gap-2">
-              {weightHistory.map((entry, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <p className="text-text-disabled text-xs">
-                    {new Date(entry.logged_at).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </p>
-                  <p className="text-text-primary text-sm font-bold">{entry.weight} {entry.unit}</p>
-                </div>
-              ))}
-            </div>
-            {weightHistory.length >= 2 && (() => {
-              const diff = weightHistory[0].weight - weightHistory[weightHistory.length - 1].weight
-              if (Math.abs(diff) < 0.1) return null
-              return (
-                <p className={`text-xs mt-3 font-bold ${diff < 0 ? 'text-success' : 'text-warning'}`}>
-                  {diff < 0 ? '↓' : '↑'} {Math.abs(diff).toFixed(1)} {weightUnit} over {weightHistory.length} logs
-                </p>
-              )
-            })()}
-          </div>
-        )}
+      <div style={{ padding: '30px 24px 30px', textAlign: 'center' }}>
+        <span style={tag()}>UNTRAINED · V 1.0.0</span>
       </div>
-
-      {/* Program */}
-      <div className="flex flex-col gap-2">
-        <p className="text-text-disabled text-xs tracking-widest px-1">YOUR PROGRAM</p>
-        <EditRow label="Goal" value={GOAL_LABELS[profile?.goal ?? ''] ?? profile?.goal ?? '—'} onTap={() => setEditField('goal')} />
-        <EditRow label="Training days" value={`${profile?.training_days ?? '—'} days / week`} onTap={() => setEditField('training_days')} />
-        <EditRow label="Environment" value={ENV_LABELS[profile?.environment ?? ''] ?? profile?.environment ?? '—'} onTap={() => setEditField('environment')} />
-        <EditRow label="Equipment" value={(profile?.equipment ?? []).map((e: string) => EQUIP_LABELS[e] ?? e).join(', ') || 'None'} onTap={() => setEditField('equipment')} />
-        <EditRow label="Training split" value={SPLIT_LABELS[profile?.split_preference ?? ''] ?? profile?.split_preference ?? '—'} onTap={() => setEditField('split_preference')} />
-        <EditRow label="Limitations" value={profile?.limitations || 'None'} onTap={() => setEditField('limitations')} />
-      </div>
-
-      {/* Settings */}
-      <div className="flex flex-col gap-2">
-        <p className="text-text-disabled text-xs tracking-widest px-1">APP SETTINGS</p>
-        <div className="bg-surface rounded-card p-4 flex items-center justify-between">
-          <div>
-            <p className="text-text-primary font-bold text-sm">AI Mode</p>
-            <p className="text-text-disabled text-xs">Smart uses API · Lite is instant</p>
-          </div>
-          <div className="flex gap-1 bg-surface-raised rounded-pill p-1">
-            {(['smart', 'lite'] as const).map(mode => (
-              <button key={mode} onClick={() => saveSetting({ ai_mode: mode })}
-                className={`h-8 px-4 rounded-pill text-xs font-bold transition-all ${
-                  (settings?.ai_mode ?? 'lite') === mode ? 'bg-accent text-navbar' : 'text-text-secondary'
-                }`}
-              >
-                {mode === 'smart' ? 'Smart' : 'Lite'}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="bg-surface rounded-card p-4 flex items-center justify-between">
-          <p className="text-text-primary font-bold text-sm">Weight unit</p>
-          <div className="flex gap-1 bg-surface-raised rounded-pill p-1">
-            {(['kg', 'lbs'] as const).map(unit => (
-              <button key={unit} onClick={() => saveSetting({ weight_unit: unit })}
-                className={`h-8 px-4 rounded-pill text-xs font-bold transition-all ${
-                  weightUnit === unit ? 'bg-accent text-navbar' : 'text-text-secondary'
-                }`}
-              >
-                {unit}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <Button fullWidth loading={signingOut} onClick={handleSignOut}
-        className="!bg-surface !text-text-secondary border border-surface-raised"
-      >
-        SIGN OUT
-      </Button>
-
-      {/* Edit sheet — pb-24 clears navbar */}
-      <AnimatePresence>
-        {editField && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 0.6 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black z-40"
-              onClick={() => setEditField(null)}
-            />
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 bg-surface rounded-t-2xl p-6 z-50 max-h-[80vh] overflow-y-auto pb-24"
-            >
-              {editField === 'weight' ? (
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-text-primary font-black text-xl">LOG WEIGHT</h3>
-                    <button onClick={() => setEditField(null)} className="text-text-disabled text-2xl leading-none">×</button>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="number" value={weightInput}
-                      onChange={e => setWeightInput(e.target.value)}
-                      placeholder="e.g. 80"
-                      className="flex-1 h-14 bg-surface-raised rounded-card px-4 text-text-primary text-2xl font-bold border border-surface-raised focus:border-accent outline-none"
-                    />
-                    <span className="text-text-secondary text-lg font-bold">{weightUnit}</span>
-                  </div>
-                  <Button fullWidth loading={saving} onClick={logWeight}>LOG</Button>
-                </div>
-              ) : (
-                <EditSheet
-                  field={editField as Exclude<EditField, 'weight' | null>}
-                  profile={profile as Record<string, unknown> | null | undefined}
-                  saving={saving}
-                  onSave={saveField}
-                  onClose={() => setEditField(null)}
-                />
-              )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}
-
-function EditRow({ label, value, onTap }: { label: string; value: string; onTap: () => void }) {
-  return (
-    <button onClick={onTap}
-      className="bg-surface rounded-card p-4 flex items-center justify-between w-full active:brightness-110 transition-all min-h-[56px]"
-    >
-      <p className="text-text-disabled text-sm">{label}</p>
-      <div className="flex items-center gap-2">
-        <p className="text-text-primary text-sm font-bold text-right max-w-[180px] truncate">{value}</p>
-        <span className="text-text-disabled text-xs">›</span>
-      </div>
-    </button>
-  )
-}
-
-function EditSheet({
-  field, profile, saving, onSave, onClose,
-}: {
-  field: Exclude<EditField, 'weight' | null>
-  profile: Record<string, unknown> | null | undefined
-  saving: boolean
-  onSave: (updates: Record<string, unknown>) => Promise<void>
-  onClose: () => void
-}) {
-  const [value, setValue] = useState<unknown>(field ? (profile?.[field] ?? '') : '')
-  if (!field) return null
-
-  const FIELD_LABELS: Record<string, string> = {
-    goal: 'Goal', training_days: 'Training Days', environment: 'Environment',
-    equipment: 'Equipment', split_preference: 'Training Split', limitations: 'Limitations',
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-text-primary font-black text-xl">{FIELD_LABELS[field]}</h3>
-        <button onClick={onClose} className="text-text-disabled text-2xl leading-none">×</button>
-      </div>
-      {field === 'goal' && (
-        <div className="flex flex-col gap-2">
-          {(['strength','muscle','endurance','weight_loss','overall'] as const).map(g => (
-            <button key={g} onClick={() => setValue(g)}
-              className={`h-12 rounded-card text-sm font-bold transition-all ${value === g ? 'bg-accent text-navbar' : 'bg-surface-raised text-text-primary'}`}
-            >{GOAL_LABELS[g]}</button>
-          ))}
-        </div>
-      )}
-      {field === 'training_days' && (
-        <div className="grid grid-cols-4 gap-2">
-          {[2,3,4,5,6,7].map(d => (
-            <button key={d} onClick={() => setValue(d)}
-              className={`h-12 rounded-card text-sm font-bold transition-all ${value === d ? 'bg-accent text-navbar' : 'bg-surface-raised text-text-primary'}`}
-            >{d}</button>
-          ))}
-        </div>
-      )}
-      {field === 'environment' && (
-        <div className="flex flex-col gap-2">
-          {(['home','gym','both','outdoors'] as const).map(e => (
-            <button key={e} onClick={() => setValue(e)}
-              className={`h-12 rounded-card text-sm font-bold transition-all ${value === e ? 'bg-accent text-navbar' : 'bg-surface-raised text-text-primary'}`}
-            >{ENV_LABELS[e]}</button>
-          ))}
-        </div>
-      )}
-      {field === 'equipment' && (
-        <div className="flex flex-col gap-2">
-          {(['none','pullup_bar','rings','gym'] as const).map(eq => {
-            const selected = Array.isArray(value) ? (value as string[]).includes(eq) : false
-            const toggle = () => {
-              const arr = Array.isArray(value) ? [...value as string[]] : []
-              setValue(selected ? arr.filter(x => x !== eq) : [...arr, eq])
-            }
-            return (
-              <button key={eq} onClick={toggle}
-                className={`h-12 rounded-card text-sm font-bold transition-all ${selected ? 'bg-accent text-navbar' : 'bg-surface-raised text-text-primary'}`}
-              >{EQUIP_LABELS[eq]}</button>
-            )
-          })}
-        </div>
-      )}
-      {field === 'split_preference' && (
-        <div className="flex flex-col gap-2">
-          {(['full_body','ppl','upper_lower','bro_split'] as const).map(s => (
-            <button key={s} onClick={() => setValue(s)}
-              className={`h-12 rounded-card text-sm font-bold transition-all ${value === s ? 'bg-accent text-navbar' : 'bg-surface-raised text-text-primary'}`}
-            >{SPLIT_LABELS[s]}</button>
-          ))}
-        </div>
-      )}
-      {field === 'limitations' && (
-        <textarea
-          value={String(value ?? '')}
-          onChange={e => setValue(e.target.value)}
-          placeholder="Describe any injuries or limitations (optional)"
-          className="w-full h-28 bg-surface-raised rounded-card p-4 text-text-primary text-sm border border-surface-raised focus:border-accent outline-none resize-none"
-        />
-      )}
-      <Button fullWidth loading={saving} onClick={() => onSave({ [field]: value })}>SAVE</Button>
     </div>
   )
 }

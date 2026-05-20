@@ -138,7 +138,7 @@ export default function TodayPage() {
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 64 }}>
+      <div style={{ minHeight: '100dvh', background: '#050505', padding: '68px 24px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#c8ff00' }} className="ut-pulse" />
         <div style={{ height: 64, width: 200, background: '#131313', borderRadius: 2 }} />
         <div style={{ height: 12, width: 140, background: '#131313', borderRadius: 2, marginTop: 4 }} />
@@ -209,24 +209,18 @@ export default function TodayPage() {
     setView('done')
   }
 
-  const dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
-  const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-  const now = new Date()
-  const dayLabel = dayNames[now.getDay()]
-  const dateStr = `${monthNames[now.getMonth()]} ${now.getDate()}`
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 64 }}>
+    <div style={{ minHeight: '100dvh', background: '#050505' }}>
       <AnimatePresence mode="wait">
 
         {view === 'done' && (
           <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <TopMeta dayLabel={dayLabel} dateStr={dateStr} />
+            <div style={{ padding: '68px 24px 0' }}>
             <div style={{
               fontFamily: '"JetBrains Mono", ui-monospace, monospace',
               fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase',
               color: '#c8ff00', marginBottom: 8,
-            }}>● COMPLETE</div>
+            }}>● SESSION COMPLETE</div>
             <div style={{
               fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
               fontWeight: 800, fontSize: 110, lineHeight: 0.85,
@@ -267,23 +261,26 @@ export default function TodayPage() {
               </>
             )}
 
-            <div style={{ ...mono, color: '#5d5d5a', marginTop: 40 }}>See you next session.</div>
+            <div style={{ fontFamily: '"JetBrains Mono",ui-monospace,monospace', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5d5d5a', marginTop: 40 }}>See you next session.</div>
+            </div>
           </motion.div>
         )}
 
         {view === 'recovery' && (
           <motion.div key="recovery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <TopMeta dayLabel={dayLabel} dateStr={dateStr} />
-            <RecoveryDay onStartSession={handleStartRecoverySession} onFullRest={handleFullRest} />
+            <div style={{ padding: '68px 24px 0' }}>
+              <RecoveryDay onStartSession={handleStartRecoverySession} onFullRest={handleFullRest} />
+            </div>
           </motion.div>
         )}
 
         {view === 'preview' && (
           <motion.div key="preview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <TopMeta dayLabel={dayLabel} dateStr={dateStr} />
             {allExercises.length === 0 ? (
-              <div style={{ padding: 16, border: '1px solid #242424', background: '#131313', borderRadius: 2, marginTop: 16 }}>
-                <span style={{ ...mono, color: '#8a8a86' }}>No exercises found. Check Supabase exercise library.</span>
+              <div style={{ padding: '68px 24px 0' }}>
+                <div style={{ padding: 16, border: '1px solid #242424', background: '#131313', borderRadius: 2, marginTop: 16 }}>
+                  <span style={{ fontFamily: '"JetBrains Mono",ui-monospace,monospace', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#8a8a86' }}>No exercises found. Check Supabase exercise library.</span>
+                </div>
               </div>
             ) : (
               <WorkoutPreview
@@ -300,13 +297,17 @@ export default function TodayPage() {
 
         {view === 'active' && (
           <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <ActiveSession onSessionEnd={handleSessionEnd} />
+            <div style={{ padding: '16px 24px 0' }}>
+              <ActiveSession onSessionEnd={handleSessionEnd} />
+            </div>
           </motion.div>
         )}
 
         {view === 'post' && (
           <motion.div key="post" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <PostWorkout onDone={handleDone} />
+            <div style={{ padding: '68px 24px 0' }}>
+              <PostWorkout onDone={handleDone} />
+            </div>
           </motion.div>
         )}
 
@@ -315,16 +316,3 @@ export default function TodayPage() {
   )
 }
 
-function TopMeta({ dayLabel, dateStr }: { dayLabel: string; dateStr: string }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#c8ff00' }} />
-        <span style={{
-          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#c9c9c7',
-        }}>{dayLabel} · {dateStr}</span>
-      </div>
-    </div>
-  )
-}

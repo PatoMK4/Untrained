@@ -3,10 +3,10 @@ import { TabBar } from './TabBar'
 
 export function AppShell() {
   return (
-    <div className="min-h-[100dvh] bg-background text-text-primary flex flex-col items-center">
-      <main className="w-full max-w-md pb-32 px-6">
+    <div style={{ minHeight: '100dvh', background: '#050505', color: '#f4f4f3', display: 'flex', justifyContent: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 402, position: 'relative', minHeight: '100dvh' }}>
         <Outlet />
-      </main>
+      </div>
       <TabBar />
     </div>
   )

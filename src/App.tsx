@@ -9,6 +9,8 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import TodayPage from '@/pages/today/TodayPage'
 import ProgressPage from '@/pages/progress/ProgressPage'
 import ProfilePage from '@/pages/profile/ProfilePage'
+import ProgramPage from '@/pages/program/ProgramPage'
+import CoachPage from '@/pages/coach/CoachPage'
 import OnboardingFlow from '@/pages/onboarding/OnboardingFlow'
 import { EmailConfirmedPage } from '@/pages/EmailConfirmedPage'
 
@@ -93,6 +95,8 @@ export default function App() {
             }
           >
             <Route index element={<TodayPage />} />
+            <Route path="program" element={<ProgramPage />} />
+            <Route path="coach" element={<CoachPage />} />
             <Route path="progress" element={<ProgressPage />} />
             <Route path="profile" element={<ProfilePage />} />
           </Route>
