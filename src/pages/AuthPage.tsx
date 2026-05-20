@@ -1,4 +1,3 @@
-// src/pages/AuthPage.tsx
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
@@ -6,6 +5,21 @@ import { Wordmark } from '@/components/ui/Wordmark'
 import { Button } from '@/components/ui/Button'
 
 type AuthMode = 'signin' | 'signup'
+
+const mono: React.CSSProperties = {
+  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+  fontSize: 10,
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
+}
+
+const disp = (size: number, weight = 700): React.CSSProperties => ({
+  fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+  fontWeight: weight,
+  fontSize: size,
+  lineHeight: 0.92,
+  letterSpacing: '-0.01em',
+})
 
 export function AuthPage() {
   const navigate = useNavigate()
@@ -23,36 +37,24 @@ export function AuthPage() {
 
   const handleEmailAuth = async () => {
     setError(null)
-    if (!email.trim()) { setError('Please enter your email address.'); return }
-    if (!password) { setError('Please enter your password.'); return }
-    if (mode === 'signup' && password.length < 6) {
-      setError('Password must be at least 6 characters.')
-      return
-    }
+    if (!email.trim()) { setError('Enter your email address.'); return }
+    if (!password) { setError('Enter your password.'); return }
+    if (mode === 'signup' && password.length < 6) { setError('Password must be at least 6 characters.'); return }
     setLoading(true)
     if (mode === 'signup') {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
+      const { error: e } = await supabase.auth.signUp({
+        email: email.trim(), password,
         options: { emailRedirectTo: `${window.location.origin}/auth/confirmed` },
       })
       setLoading(false)
-      if (signUpError) { setError(signUpError.message); return }
+      if (e) { setError(e.message); return }
       setSignupPending(true)
     } else {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      })
-      if (signInError) {
-        setError(
-          signInError.message.toLowerCase().includes('invalid') ||
-          signInError.message.toLowerCase().includes('credentials')
-            ? 'Wrong email or password. Try again or reset your password below.'
-            : signInError.message
-        )
-        setLoading(false)
-        return
+      const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+      if (e) {
+        setError(e.message.toLowerCase().includes('invalid') || e.message.toLowerCase().includes('credentials')
+          ? 'Wrong email or password.' : e.message)
+        setLoading(false); return
       }
       navigate('/', { replace: true })
     }
@@ -60,188 +62,220 @@ export function AuthPage() {
   }
 
   const handleGoogle = async () => {
-    setError(null)
-    setGoogleLoading(true)
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    })
-    if (oauthError) { setError(oauthError.message); setGoogleLoading(false) }
+    setError(null); setGoogleLoading(true)
+    const { error: e } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })
+    if (e) { setError(e.message); setGoogleLoading(false) }
   }
 
   const handlePasswordReset = async () => {
     setError(null)
     if (!resetEmail.trim()) { setError('Enter your email address.'); return }
     setResetLoading(true)
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
-      resetEmail.trim(),
-      { redirectTo: `${window.location.origin}/reset-password` }
-    )
+    const { error: e } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), { redirectTo: `${window.location.origin}/reset-password` })
     setResetLoading(false)
-    if (resetError) { setError(resetError.message); return }
+    if (e) { setError(e.message); return }
     setResetSent(true)
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleEmailAuth()
-  }
+  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter') handleEmailAuth() }
 
-  // Signup pending - waiting for email confirmation
   if (signupPending) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 gap-8 text-center">
-        <Wordmark size="xl" />
-        <div className="flex flex-col gap-3">
-          <p className="text-5xl">✉️</p>
-          <h1 className="text-2xl font-black text-text-primary">Check your email.</h1>
-          <p className="text-text-secondary text-sm">
-            We sent a confirmation link to
-          </p>
-          <p className="text-text-primary font-bold text-sm">{email}</p>
-          <p className="text-text-secondary text-sm">
-            Click the link in the email to confirm your account, then come back and sign in.
-          </p>
+      <div className="min-h-[100dvh] bg-background flex flex-col px-6 pt-16 pb-10">
+        <MetaRow left="● CHECK EMAIL" leftLime right="UT—003" />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16 }}>
+          <div style={disp(72, 800)}>ALMOST<br />THERE.</div>
+          <div style={{ ...mono, color: '#8a8a86', lineHeight: 1.8 }}>
+            Link sent to<br /><span style={{ color: '#f4f4f3' }}>{email}</span>
+          </div>
         </div>
-        <button
-          onClick={() => { setSignupPending(false); setMode('signin') }}
-          className="text-accent text-sm font-bold min-h-[44px] px-4"
-        >
-          Back to sign in
+        <button onClick={() => { setSignupPending(false); setMode('signin') }}
+          style={{ ...mono, color: '#8a8a86', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', minHeight: 44 }}>
+          ← I already have an account
         </button>
       </div>
     )
   }
 
-  // Password reset screen
   if (showReset) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 gap-8">
-        <Wordmark size="xl" />
+      <div className="min-h-[100dvh] bg-background flex flex-col px-6 pt-16 pb-10">
+        <div style={{ marginBottom: 40 }}>
+          <button onClick={() => { setShowReset(false); setError(null) }}
+            style={{ ...mono, color: '#c9c9c7', background: 'none', border: 'none', cursor: 'pointer', minHeight: 44 }}>
+            ← BACK
+          </button>
+        </div>
         {resetSent ? (
-          <div className="w-full max-w-sm flex flex-col items-center gap-4 text-center">
-            <p className="text-5xl">✉️</p>
-            <p className="text-text-primary font-bold text-xl">Check your email.</p>
-            <p className="text-text-secondary text-sm">
-              We sent a reset link to {resetEmail}.
-            </p>
-            <button
-              onClick={() => { setShowReset(false); setResetSent(false); setResetEmail('') }}
-              className="text-accent text-sm font-bold min-h-[44px] px-4"
-            >
-              Back to sign in
-            </button>
-          </div>
+          <>
+            <div style={disp(56, 800)}>CHECK<br />EMAIL.</div>
+            <div style={{ ...mono, color: '#8a8a86', marginTop: 16 }}>Link sent to {resetEmail}.</div>
+          </>
         ) : (
-          <div className="w-full max-w-sm flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-black text-text-primary">Reset password</h1>
-              <p className="text-text-secondary text-sm">
-                We'll send a reset link to your email.
-              </p>
+          <>
+            <div style={{ ...mono, color: '#8a8a86', marginBottom: 8 }}>RESET PASSWORD</div>
+            <div style={{ ...disp(56, 800), marginBottom: 40 }}>FORGOT?<br />NO SWEAT.</div>
+            {error && <ErrorBox message={error} />}
+            <Field label="EMAIL" value={resetEmail} onChange={setResetEmail} type="email" />
+            <div style={{ marginTop: 40 }}>
+              <Button fullWidth size="lg" loading={resetLoading} onClick={handlePasswordReset} sub="EMAIL">
+                SEND LINK
+              </Button>
             </div>
-            {error && (
-              <div className="p-3 bg-surface border border-red-500 rounded-xl">
-                <p className="text-red-400 text-sm">{error}</p>
-              </div>
-            )}
-            <input
-              type="email"
-              value={resetEmail}
-              onChange={(e) => setResetEmail(e.target.value)}
-              placeholder="your@email.com"
-              autoComplete="email"
-              className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary border border-surface-raised focus:border-accent outline-none text-base"
-            />
-            <Button fullWidth loading={resetLoading} onClick={handlePasswordReset}>
-              SEND RESET LINK
-            </Button>
-            <button
-              onClick={() => { setShowReset(false); setError(null) }}
-              className="text-text-secondary text-sm min-h-[44px]"
-            >
-              Cancel
-            </button>
-          </div>
+          </>
         )}
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 gap-8">
-      <div className="flex flex-col items-center gap-2">
-        <Wordmark size="xl" />
-        <p className="text-text-disabled text-sm tracking-widest">TRAIN. PROGRESS. REPEAT.</p>
+    <div className="min-h-[100dvh] bg-background flex flex-col px-6 pt-16 pb-10">
+      <MetaRow
+        left="● SYSTEM READY"
+        leftLime
+        right={mode === 'signup' ? 'UT—003 · NEW' : 'UT—002'}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0 40px' }}>
+        <div style={{ flex: 1, height: 1, background: '#242424' }} />
+        <span style={{ ...mono, fontSize: 9, color: '#5d5d5a' }}>EST · 2026 · BUILD 1.0.0</span>
+        <div style={{ flex: 1, height: 1, background: '#242424' }} />
       </div>
-      <div className="w-full max-w-sm flex flex-col gap-4">
-        {error && (
-          <div className="p-3 bg-surface border border-red-500 rounded-xl">
-            <p className="text-red-400 text-sm">{error}</p>
-          </div>
+
+      {mode === 'signin' ? (
+        <>
+          <div style={{ ...mono, color: '#8a8a86', marginBottom: 8 }}>RETURNING</div>
+          <div style={disp(64, 700)}>Welcome<br />back.</div>
+        </>
+      ) : (
+        <>
+          <div style={{ ...mono, color: '#8a8a86', marginBottom: 8 }}>STEP 00 / 06</div>
+          <div style={disp(64, 700)}>Make your<br />account.</div>
+        </>
+      )}
+
+      <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column', gap: 28 }}>
+        {error && <ErrorBox message={error} />}
+        {mode === 'signup' && (
+          <Field label="NAME" value="" onChange={() => {}} type="text" placeholder="Your name" />
         )}
-        <button
-          onClick={handleGoogle}
-          disabled={googleLoading || loading}
-          className="w-full h-12 bg-white rounded-pill flex items-center justify-center gap-3 font-bold text-sm text-gray-800 active:brightness-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {googleLoading ? (
-            <span className="animate-spin text-gray-500">◌</span>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
-              <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/>
-              <path d="M3.964 10.707A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
-              <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-            </svg>
-          )}
-          {googleLoading ? 'Redirecting...' : 'Continue with Google'}
-        </button>
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-surface-raised" />
-          <span className="text-text-disabled text-xs">or</span>
-          <div className="flex-1 h-px bg-surface-raised" />
-        </div>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Email address"
-          autoComplete="email"
-          className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary border border-surface-raised focus:border-accent outline-none text-base"
-        />
-        <input
-          type="password"
+        <Field label="EMAIL" value={email} onChange={setEmail} type="email" onKeyDown={handleKeyDown} />
+        <Field
+          label={mode === 'signup' ? 'CREATE PASSWORD' : 'PASSWORD'}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={setPassword}
+          type="password"
           onKeyDown={handleKeyDown}
-          placeholder={mode === 'signup' ? 'Create a password (min 6 chars)' : 'Password'}
-          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          className="w-full h-12 bg-surface rounded-xl px-4 text-text-primary border border-surface-raised focus:border-accent outline-none text-base"
+          caret
         />
         {mode === 'signin' && (
           <button
             onClick={() => { setShowReset(true); setResetEmail(email); setError(null) }}
-            className="text-text-secondary text-sm text-right -mt-2 min-h-[44px] flex items-center justify-end"
+            style={{ ...mono, color: '#5d5d5a', textAlign: 'right', background: 'none', border: 'none', cursor: 'pointer', minHeight: 44, marginTop: -12 }}
           >
-            Forgot password?
+            FORGOT?
           </button>
         )}
-        <Button fullWidth loading={loading} onClick={handleEmailAuth}>
-          {mode === 'signup' ? 'CREATE ACCOUNT' : 'SIGN IN'}
-        </Button>
-        <div className="flex items-center justify-center gap-1">
-          <span className="text-text-secondary text-sm">
-            {mode === 'signin' ? "Don't have an account?" : 'Already have an account?'}
-          </span>
-          <button
-            onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(null) }}
-            className="text-accent text-sm font-bold min-h-[44px] px-2"
-          >
-            {mode === 'signin' ? 'Sign up' : 'Sign in'}
-          </button>
-        </div>
       </div>
+
+      <div style={{ flex: 1, minHeight: 40 }} />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <SocialBtn label="APPLE" onClick={() => {}} />
+          <SocialBtn label={googleLoading ? '...' : 'GOOGLE'} onClick={handleGoogle} />
+        </div>
+        <Button fullWidth size="lg" loading={loading} onClick={handleEmailAuth} sub="EMAIL">
+          {mode === 'signup' ? 'CREATE' : 'CONTINUE'}
+        </Button>
+        <button
+          onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(null) }}
+          style={{ ...mono, color: '#8a8a86', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', minHeight: 44 }}
+        >
+          {mode === 'signin' ? "Don't have an account →" : 'I already have an account →'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MetaRow({ left, leftLime = false, right }: { left: string; leftLime?: boolean; right: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+      <span style={{
+        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+        fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase',
+        color: leftLime ? '#c8ff00' : '#8a8a86',
+      }}>{left}</span>
+      <span style={{
+        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+        fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#5d5d5a',
+      }}>{right}</span>
+    </div>
+  )
+}
+
+function Field({
+  label, value, onChange, type = 'text', caret = false, placeholder, onKeyDown,
+}: {
+  label: string; value: string; onChange: (v: string) => void
+  type?: string; caret?: boolean; placeholder?: string
+  onKeyDown?: (e: React.KeyboardEvent) => void
+}) {
+  return (
+    <div>
+      <div style={{
+        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+        fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#8a8a86',
+        marginBottom: 8,
+      }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 10, borderBottom: '1px solid #2e2e2e' }}>
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          autoComplete={type === 'password' ? 'current-password' : type === 'email' ? 'email' : 'off'}
+          style={{
+            flex: 1, background: 'transparent',
+            fontFamily: '"Barlow", "Helvetica Neue", system-ui, sans-serif',
+            fontSize: 22, color: '#f4f4f3', outline: 'none', border: 'none',
+            letterSpacing: '-0.005em',
+          }}
+        />
+        {caret && (
+          <span className="ut-pulse" style={{ display: 'inline-block', width: 2, height: 22, background: '#c8ff00', marginLeft: 3 }} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SocialBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1, height: 48, background: 'transparent',
+        border: '1px solid #2e2e2e', borderRadius: 2, cursor: 'pointer',
+        fontFamily: '"Barlow Condensed", "Arial Narrow", sans-serif',
+        fontSize: 18, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+        color: '#f4f4f3',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div style={{ padding: '12px 14px', border: '1px solid rgba(255,68,35,0.4)', background: 'rgba(255,68,35,0.08)', borderRadius: 2 }}>
+      <span style={{
+        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+        fontSize: 11, letterSpacing: '0.06em', color: '#ff4423',
+      }}>{message}</span>
     </div>
   )
 }
